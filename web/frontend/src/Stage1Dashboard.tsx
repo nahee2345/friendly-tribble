@@ -17,6 +17,8 @@ type SourceEvidence={kind:string;provider:string;source_url:string;as_of:string;
 type QuantAssessment={symbol:string;status:string;recommendation:string;score:number|null;partial_score:number|null;coverage_pct:number;strategies:Record<string,Factor>;strategies_scored:string[];positive_reasons:string[];risk_reasons:string[];unknown_reasons:string[];source_evidence:SourceEvidence[];no_orders:boolean;paper_order_eligible:boolean};
 type QuantBatch={status:string;items:QuantAssessment[];weights:Record<string,number>;evaluated:number;ready:number;scoring_basis:string};
 type PaperPlan={status:string;reason:string;for_date?:string;portfolio_value_krw:string|null;cash_krw_equivalent:string|null;reserve_percent?:string;daily_spend_cap_krw:string|null;allocation:Record<string,{target_pct:string;held_krw:string;drift_krw:string}>;proposed_orders:{request_id:string;account:string;symbol:string;side:string;quantity:number;notional_krw:string;strategy_score:number|null;coverage_pct:number;reason:string}[];review:{symbol:string;account:string;reason:string;approval_required?:boolean}[];data_errors:string[];trade_enabled:boolean;quant_ready:number;quant_evaluated:number;rules:string[]};
+type Stage5Accounting={status:string;valuation_complete:boolean;market_valuation_krw:string|null;gross_change_after_contributions_krw:string|null;contributions_krw:string;gross_change_pct:string|null;reference_usd_krw:string|null;xirr:{status:string;pct:number|null;reason?:string};twr:{status:string;pct:number|null;reason?:string};native_gross_pnl:Record<string,{realized:string;unrealized:string}>;positions:{account:string;symbol:string;currency:string;unrealized_native:string;fx_effect_krw:string|null;market_price_effect_krw:string|null;fx_split_status:string;price_as_of:string;price_source_url:string}[];potential_dividends:{symbol:string;ex_date:string;potential_gross:string;currency:string;source_url:string}[];fee_analysis:{illustrative_trade_fees_krw:string|null;actual_fee_amount_complete:boolean};tax_illustrations:{status:string;domestic_isa?:{included_symbols:string[];taxable_gain_proxy_krw:string;general_scenario_tax_krw:string;isa_scenario_tax_krw:string;potential_isa_saving_krw:string}|null;warning?:string};missing:string[];warnings:string[]};
+
 
 const strategyLabels:Record<string,string>={index:'장기지수',value:'가치',quality_growth:'우량성장',growth:'성장',high_dividend:'고배당',dividend_growth:'배당성장',momentum:'모멘텀',asset_allocation:'자산배분'};
 type ReferenceHealth={current_references:Record<string,number>;recent_attempts:{kind:string;symbol:string;provider:string;checked_utc:string;status:string;error_code:string|null;retry_after_utc:string}[];paper_order_eligible:boolean;notice:string;sec_contact_configured:boolean};
@@ -58,6 +60,8 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
   const [referenceHealth,setReferenceHealth]=useState<ReferenceHealth|null>(null);
   const [quant,setQuant]=useState<QuantBatch|null>(null);
   const [plan,setPlan]=useState<PaperPlan|null>(null);
+  const [accounting,setAccounting]=useState<Stage5Accounting|null>(null);
+  const [showAccounting,setShowAccounting]=useState(false);
   const [showPlan,setShowPlan]=useState(false);
   const [selectedAssessment,setSelectedAssessment]=useState<QuantAssessment|null>(null);
   const [showReferences,setShowReferences]=useState(false);
@@ -65,11 +69,13 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
     setBusy(true);setError('');
     const results=await Promise.allSettled([read<Hub>('/api/v1/stage1/hub'),read<NewsReport>('/api/v1/stage1/news-30d'),
       read<QuantBatch>('/api/v1/stage1/quantitative'),
-      read<PaperPlan>('/api/v1/stage1/portfolio-plan')]);
+      read<PaperPlan>('/api/v1/stage1/portfolio-plan'),
+      read<Stage5Accounting>('/api/v1/stage1/accounting')]);
     if(results[0].status==='fulfilled')setHub(results[0].value);else setError('시장·자산 평가를 확인하지 못했습니다. 서버와 가격 공급원을 확인하세요.');
     if(results[1].status==='fulfilled')setNews(results[1].value);
     if(results[2].status==='fulfilled')setQuant(results[2].value);else setQuant(null);
     if(results[3].status==='fulfilled')setPlan(results[3].value);else setPlan(null);
+    if(results[4].status==='fulfilled')setAccounting(results[4].value);else setAccounting(null);
     const inbox=await read<{items:{event_id:string;read_at:string|null}[]}>('/api/v1/stage1/inbox').catch(()=>null);
     if(inbox)setRiskUnread(inbox.items.filter(x=>x.event_id.startsWith('risk:')&&!x.read_at).length);
     const reference=await read<ReferenceHealth>('/api/v1/stage1/reference/health').catch(()=>null);
@@ -159,9 +165,16 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
       <section className="wh-card wh-markets"><div className="wh-head"><b>시장 현황</b><small>지연 일간 종가 · 기준일 표시</small></div><div className="wh-indexgrid">
         {(hub?.markets??[{name:'KOSPI'},{name:'KOSDAQ'},{name:'S&P 500'},{name:'NASDAQ'}]).map(m=><div className="wh-index" key={m.name}><small>{m.name}</small><strong>{'value'in m?fmt(m.value,2):'조회 중'}</strong><span>{'change_pct'in m&&m.change_pct!==null&&m.change_pct!==undefined?(m.change_pct>0?'+':'')+m.change_pct+'%':'등락 미확인'}</span><small>{'as_of'in m?m.as_of:'–'}</small></div>)}
         </div></section>
-      <section className="wh-card wh-assets"><div className="wh-head"><b>내 총자산 흐름</b><small>{hub?.performance.complete?'검증 종가 기준':'평가 미확정'}</small></div>
-        <div className="wh-total">{hub?.performance.complete?'₩'+fmt(hub.performance.portfolio_value_krw):'시세 확인 필요'}</div>
-        <div className="wh-kpis"><span>누적 입금 ₩{fmt(hub?.performance.contributions_krw)}</span><span>손익 {hub?.performance.complete?'₩'+fmt(hub.performance.return_krw):'미확정'}</span><span>수익률 {hub?.performance.complete?fmt(hub.performance.return_pct,2)+'%':'미확정'}</span></div>
+      <section className="wh-card wh-assets"><div className="wh-head"><b>내 총자산 흐름</b>
+        <button className="wh-plan-trigger" onClick={()=>setShowAccounting(true)}>
+          손익·환율 근거 ›
+        </button></div>
+        <div className="wh-total">{accounting?.valuation_complete?'₩'+fmt(accounting.market_valuation_krw):
+          hub?.performance.complete?'₩'+fmt(hub.performance.portfolio_value_krw):'시세 확인 필요'}</div>
+        <div className="wh-kpis"><span>누적 입금 ₩{fmt(accounting?.contributions_krw??hub?.performance.contributions_krw)}</span>
+          <span>총손익(세전) {accounting?.valuation_complete?'₩'+fmt(accounting.gross_change_after_contributions_krw):
+            hub?.performance.complete?'₩'+fmt(hub.performance.return_krw):'미확정'}</span>
+          <span>XIRR {accounting?.xirr.status==='ok'?fmt(accounting.xirr.pct,2)+'%':'미확정'}</span></div>
         <div className="wh-chart"><AssetGraph data={hub?.history??[]}/></div><div className="wh-legend"><span>━ 평가자산</span><span>┄ 누적 입금원금</span></div></section>
       <section className="wh-card wh-accounts"><div className="wh-head"><b>가상계좌</b><small>미국 · 한국 · ISA</small></div>
         {(hub?.accounts??[]).map(a=><div className="wh-account" key={a.id}><b>{a.id==='default'?'미국 일반':a.id==='kr-base'?'한국 일반':a.id==='isa-base'?'ISA':a.name}</b><span>₩{fmt(a.krw_cash)} · ${fmt(a.usd_cash,2)}</span><small>보유 {a.holdings}종</small></div>)}
@@ -206,6 +219,39 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
          <p>종목 검색은 자동매수 승인과 다릅니다. 검증되지 않은 데이터는 체결에 사용하지 않습니다.</p></>:<p>왼쪽에서 종목을 선택해 주세요.</p>}
          <small>{catalog?.notice??'종목목록 범위 확인 중'}</small></div></div>
       </main>}
+    {showAccounting&&<div className="wh-overlay" onClick={()=>setShowAccounting(false)}>
+      <div className="wh-modal" role="dialog" aria-modal="true" aria-label="5단계 자산별 손익·환율·배당·세금 분석" onClick={e=>e.stopPropagation()}>
+        <div className="wh-head"><b>5단계 회계·세후 시나리오</b><button onClick={()=>setShowAccounting(false)} aria-label="닫기">✕</button></div>
+        <div className="wh-slide">
+          <p>총 가상자산 <b>{accounting?.valuation_complete?'₩'+fmt(accounting.market_valuation_krw):'검증 자료 부족'}</b>
+             · 총입금 ₩{fmt(accounting?.contributions_krw)}</p>
+          <p>입금 후 총손익(비용·세금·배당 입금 전) <b>{accounting?.valuation_complete?'₩'+fmt(accounting.gross_change_after_contributions_krw):'미확정'}</b></p>
+          <p>입금일 반영 연환산 XIRR: {accounting?.xirr.status==='ok'?fmt(accounting.xirr.pct,2)+'%':'미산정 · '+(accounting?.xirr.reason??'검증 대기')}
+            · TWR: {accounting?.twr.status==='ok'?fmt(accounting.twr.pct,2)+'%':'미산정 · '+(accounting?.twr.reason??'일별 관측 부족')}</p>
+          <h4>종목별 원화/달러 주가손익과 환율효과</h4>
+          {accounting?.positions.length?accounting.positions.map((x,i)=><p key={x.account+x.symbol+i}>
+            <b>{x.symbol}</b> {x.account} · 미실현 주가손익 {fmt(x.unrealized_native,2)} {x.currency}
+            {x.currency==='USD'?<small> · 원화 주가효과 {x.market_price_effect_krw===null?'매수환율 미확인':fmt(x.market_price_effect_krw)}
+             · 환율효과 {x.fx_effect_krw===null?'매수환율 미확인':fmt(x.fx_effect_krw)}</small>:null}
+             · <a href={x.price_source_url} target="_blank" rel="noreferrer">기준 종가 원본 ↗</a>
+          </p>):<p>검증된 보유종목 손익이 없거나 자료가 부족합니다.</p>}
+          <h4>배당락일 권리 가능성 (지급 미확인)</h4>
+          {accounting?.potential_dividends.length?accounting.potential_dividends.slice(0,8).map((x,i)=><p key={x.symbol+x.ex_date+i}>
+            {x.symbol} {x.ex_date} · 추정 {x.potential_gross} {x.currency}
+            · <a href={x.source_url} target="_blank" rel="noreferrer">공개 이벤트 ↗</a></p>):
+            <p>검증된 배당락일 후보 없음. 실제 지급 0원을 의미하지 않습니다.</p>}
+          <h4>거래비용 및 일반계좌·ISA 비교</h4>
+          <p>수수료 가정(확정 비용 아님): {accounting?.fee_analysis.illustrative_trade_fees_krw?'₩'+fmt(accounting.fee_analysis.illustrative_trade_fees_krw):'미산정'}</p>
+          {accounting?.tax_illustrations.domestic_isa?<p>국내상장 해외지수 ETF만 포함:
+             일반계좌 예시세금 ₩{fmt(accounting.tax_illustrations.domestic_isa.general_scenario_tax_krw)}
+             · ISA 예시세금 ₩{fmt(accounting.tax_illustrations.domestic_isa.isa_scenario_tax_krw)}
+             · 가정상 차이 ₩{fmt(accounting.tax_illustrations.domestic_isa.potential_isa_saving_krw)}</p>:
+            <p>비교 가능한 국내상장 해외지수 ETF 평가손익 없음</p>}
+          <small>배당·수수료·세금은 실제 가상 현금에 차감/입금하지 않았습니다. ISA 차이는 가정 시나리오이며 실제 세금이 아닙니다.</small>
+          {accounting?.missing.map((x,i)=><p key={i}>자료 부족: {x}</p>)}
+        </div>
+      </div>
+    </div>}
     {showPlan&&<div className="wh-overlay" onClick={()=>setShowPlan(false)}>
       <div className="wh-modal" role="dialog" aria-modal="true" aria-label="통합 모의투자 계획과 시장별 목표 비중" onClick={e=>e.stopPropagation()}>
         <div className="wh-head"><b>4단계 통합 자산·투자계획</b><button onClick={()=>setShowPlan(false)} aria-label="닫기">✕</button></div>
