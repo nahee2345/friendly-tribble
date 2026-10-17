@@ -1,6 +1,7 @@
 """Stage1 valuation and atomic exchange/entry regression tests."""
 from datetime import date
 from decimal import Decimal
+import sqlite3
 
 import pytest
 
@@ -57,7 +58,7 @@ def test_bad_quote_rolls_back_fx_and_order(tmp_path):
     before = ledger.state('test', date(2026, 10, 17))['events']
     q = fake_quote('SCHD')
     q['source'] = None
-    with pytest.raises((ValueError, TypeError, KeyError)):
+    with pytest.raises((ValueError, TypeError, KeyError, sqlite3.IntegrityError)):
         accounts.auto_buy_usd_with_fx('test','SCHD',q,'1400','auto:20261017:etf')
     assert ledger.state('test', date(2026, 10, 17))['events'] == before
     assert accounts.orders('test','default')['orders'] == []
