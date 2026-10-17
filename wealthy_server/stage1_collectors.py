@@ -205,6 +205,7 @@ class Collector:
         self.quote=quote;self.history_us=history_us;self.history_kr=history_kr
         self.fx=fx;self.news=news;self.dividends=dividends;self.fundamentals=fundamentals
         self._news_memo=None
+        self._cursor=0
 
     def _fetch(self,kind,symbol):
         if kind=="PRICE":return self.quote(symbol)
@@ -290,19 +291,31 @@ class Collector:
         from .stage1_discovery import CANDIDATES
         universe=held+[code for code,*_ in CANDIDATES if code not in held]
         universe+=["005930","000660","069500","360750"]
+        # Fair rotation: frequently refreshed prices cannot starve history or dividends.
         tasks=[("FX","USD/KRW"),("NEWS","US"),("NEWS","KR")]
-        tasks.extend(("PRICE",s) for s in dict.fromkeys(universe))
-        tasks.extend(("HISTORY",s) for s in dict.fromkeys(universe[:4]))
-        tasks.extend(("DIVIDENDS",s) for s in dict.fromkeys(universe[:4]))
-        # SEC official companyfacts is keyless but requires a declared,
-        # valid contact. It is not part of mandatory portfolio execution.
-        tasks.extend(("FUNDAMENTALS",s) for s in dict.fromkeys(
-            x for x in universe[:4] if not x.isdigit()))
+        from .stage1_decisions import CATALOG
+        etfs={item[0] for item in CATALOG if item[3]=="ETF"}
+        has_sec_contact=bool(os.environ.get("WEALTHY_SEC_CONTACT"))
+        for symbol in dict.fromkeys(universe):
+            tasks.append(("PRICE",symbol))
+            tasks.append(("HISTORY",symbol))
+            tasks.append(("DIVIDENDS",symbol))
+            if has_sec_contact and not symbol.isdigit() and symbol not in etfs:
+                tasks.append(("FUNDAMENTALS",symbol))
+        tasks=list(dict.fromkeys(tasks))
         attempted=[]
-        for kind,symbol in tasks:
-            if len(attempted)>=max_requests:break
-            provider=_provider(kind,symbol)
-            if self.store.due(kind,symbol,provider):
-                attempted.append(self.collect(kind,symbol))
+        if tasks:
+            start=self._cursor%len(tasks)
+            for offset in range(len(tasks)):
+                idx=(start+offset)%len(tasks)
+                kind,symbol=tasks[idx]
+                provider=_provider(kind,symbol)
+                if self.store.due(kind,symbol,provider):
+                    attempted.append(self.collect(kind,symbol))
+                    self._cursor=(idx+1)%len(tasks)
+                if len(attempted)>=max_requests:
+                    break
+            if not attempted:
+                self._cursor=(start+max_requests)%len(tasks)
         return {"attempts":attempted,"max_requests":max_requests,
                 "paper_trade_status":"NOT_CONNECTED","store":self.store.health(limit=12)}
