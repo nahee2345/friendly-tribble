@@ -49,6 +49,7 @@ def fetch_daily_history(symbol: str, *, today=None, opener=None) -> dict:
         if not 0 <= age <= 5:
             raise ValueError("stale")
         return {"status": "ok", "symbol": symbol, "source": "Stooq delayed daily close",
+                "source_url": url,
                 "currency": "USD", "prices": [{"date": d.isoformat(), "close": str(v)}
                                              for d, v in rows],
                 "as_of": rows[-1][0].isoformat(),
