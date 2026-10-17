@@ -845,7 +845,8 @@ def create_app(
             from .stage1_daily_cards import generate_cards
             initialize_paper_accounts(actor.owner_id, stage1, portfolio_store)
             return generate_cards(actor.owner_id,portfolio_store,stage1,
-                                  preference_store,stage1_strategy_policy)
+                                  preference_store,stage1_strategy_policy,
+                                  accounting_engine=stage5_engine)
 
         @app.get("/api/v1/stage1/daily-reports")
         def stage1_daily_reports(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
