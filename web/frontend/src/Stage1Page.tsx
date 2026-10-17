@@ -37,6 +37,10 @@ export function Stage1Page(){
 
   type ReportCard={id:number;title:string;status:string;result:string;detail:string};
   const [reportCards,setReportCards]=useState<ReportCard[]>([]);
+  type ArchivedReport={for_date:string;generated_kst:string;late_generation?:boolean;cards:ReportCard[]};
+  const [archivedCards,setArchivedCards]=useState<ArchivedReport[]>([]);
+  async function refreshCardHistory(){try{const data=await get<{items:ArchivedReport[]}>('/api/v1/stage1/seven-cards/history');setArchivedCards(data.items);}catch(e){setError(String(e));}}
+
   async function refreshCards(){try{const result=await get<{cards:ReportCard[]}>('/api/v1/stage1/seven-cards');setReportCards(result.cards);}catch(e){setError(String(e));}}
   const [dailyReports,setDailyReports]=useState<{date:string;checked_at:string;us:{status:string;symbol?:string;reason?:string};domestic:{account:string;status:string;symbol?:string;reason?:string}[];exits:{account:string;symbol:string;status:string}[]}[]>([]);
   type Candidate={symbol:string;name:string;kind:string;market:string;thesis:string;risks:string;issuer_url:string;quote:Quote;rating:string;account:string; evidence:string[]};
@@ -62,7 +66,7 @@ export function Stage1Page(){
   async function decideApproval(request_id:string,approve:boolean){await action(async()=>{const r=await post<{items:Approval[]}>('/api/v1/stage1/approvals/decide',{request_id,approve});setApprovals(r.items);},approve?'가상 주문 승인을 기록했습니다. 실제 체결은 별도 재검증 필요.':'승인 요청을 거부했습니다.');}
 
   async function refresh(){try{const f=await get<State>('/api/v1/stage1/account');get<typeof performance>('/api/v1/stage1/performance').then(x=>setPerformance(x)).catch(()=>setPerformance(null));const p=await get<{accounts:A[]}>('/api/v1/stage1/portfolios');setFund(f);setAccounts(p.accounts);setError('');}catch(e){setError(String(e));}}
-  useEffect(()=>{void refresh();void reloadControls();void refreshCards();get<typeof preferences>('/api/v1/stage1/preferences').then(setPreferences).catch(()=>{});get<{weights:Record<string,number>}>('/api/v1/stage1/strategy-weights').then(r=>setStrategyWeights(r.weights)).catch(()=>{});void refreshDecisions();void refreshImpacts();get<typeof fundingPolicy>('/api/v1/stage1/funding-allocation').then(setFundingPolicy).catch(()=>{});get<{items:typeof dailyReports}>('/api/v1/stage1/daily-reports').then(x=>setDailyReports(x.items)).catch(()=>{});void discover();get<{status:string;usd_krw?:string;as_of?:string}>('/api/v1/stage1/fx').then(setFx).catch(()=>{});(['US','KR'] as const).forEach(region=>get<{items:Article[]}>('/api/v1/stage1/news/'+region).then(x=>setNews(prev=>({...prev,[region]:x.items||[]}))).catch(()=>{}));},[]);
+  useEffect(()=>{void refresh();void reloadControls();void refreshCards();void refreshCardHistory();get<typeof preferences>('/api/v1/stage1/preferences').then(setPreferences).catch(()=>{});get<{weights:Record<string,number>}>('/api/v1/stage1/strategy-weights').then(r=>setStrategyWeights(r.weights)).catch(()=>{});void refreshDecisions();void refreshImpacts();get<typeof fundingPolicy>('/api/v1/stage1/funding-allocation').then(setFundingPolicy).catch(()=>{});get<{items:typeof dailyReports}>('/api/v1/stage1/daily-reports').then(x=>setDailyReports(x.items)).catch(()=>{});void discover();get<{status:string;usd_krw?:string;as_of?:string}>('/api/v1/stage1/fx').then(setFx).catch(()=>{});(['US','KR'] as const).forEach(region=>get<{items:Article[]}>('/api/v1/stage1/news/'+region).then(x=>setNews(prev=>({...prev,[region]:x.items||[]}))).catch(()=>{}));},[]);
   useEffect(()=>{let active=true;const fetchStatus=()=>{get<{enabled:boolean;last_checked_at:string|null;last_result:{status:string;reason?:string;symbol?:string}}>('/api/v1/stage1/auto-status').then(x=>{if(active)setAuto(x);}).catch(()=>{});};fetchStatus();const handle=setInterval(fetchStatus,60_000);return()=>{active=false;clearInterval(handle);};},[]);
   useEffect(()=>{get<{orders:typeof orders}>(`/api/v1/stage1/portfolios/${encodeURIComponent(selected)}/orders`).then(x=>setOrders(x.orders)).catch(()=>setOrders([]));},[selected,accounts.length]);
   const current=accounts.find(x=>x.id===selected)||accounts[0];
@@ -173,6 +177,11 @@ export function Stage1Page(){
         <p>{card.status}</p><details><summary>계산 기준 · 확인 사항</summary>{card.detail}</details>
       </article>)}</div>
       {!reportCards.length&&<p className="s1-empty">카드를 생성하지 못했습니다. 서버 및 권한 상태를 확인해 주세요.</p>}
+      <h3>오후 4시 자동 저장 보고서</h3><button className="s1-outline" onClick={()=>void refreshCardHistory()}>저장 기록 갱신</button>
+      {archivedCards.map(r=><details key={r.for_date}><summary>{r.for_date} · 생성 {r.generated_kst} · {r.late_generation?'지연 생성':'정시 생성'}</summary>
+        {r.cards.map(c=><p key={c.id}>{c.id}. {c.title}: {c.result}</p>)}</details>)}
+      {!archivedCards.length&&<p className="s1-empty">오후 4시 이후 자동 저장된 보고서가 없습니다. PC가 꺼져 있으면 생성되지 않습니다.</p>}
+
     </section>}
     {section==='reports'&&<section className="s1-panel"><div className="s1-panelhead"><h2>일별 자동 모의투자 보고서</h2><button className="s1-outline" onClick={()=>void get<{items:typeof dailyReports}>('/api/v1/stage1/daily-reports').then(x=>setDailyReports(x.items)).catch(()=>setError('보고서를 조회하지 못했습니다.'))}>새로고침</button></div>
         <p className="s1-desc">최근 30일, 한국 시간 기준. 서버 실행 중 생성된 가상 주문·검토 결과입니다. 뉴스 기반 투자 예측 결과가 아닙니다.</p>
