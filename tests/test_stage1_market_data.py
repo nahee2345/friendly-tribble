@@ -244,3 +244,64 @@ def test_backdated_attempt_cannot_supersede_newer_verified_reference(tmp_path):
     current=store.latest("PRICE","AAPL",now=NOW+timedelta(hours=3))
     assert current["data"]["price"]=="180.25"
     assert current["status"]=="ok"
+
+
+def test_news_feed_download_is_shared_across_us_kr_collections(tmp_path):
+    captured=[]
+    def news_bundle():
+        captured.append("rss")
+        return {"status":"ok","unavailable":[],"items":[
+            {"title":"US company earnings","market":"US",
+             "url":"https://news.google.com/articles/us-example",
+             "published_utc":"2026-10-16T18:00:00+00:00"},
+            {"title":"한국 기업 실적","market":"KR",
+             "url":"https://news.google.com/articles/kr-example",
+             "published_utc":"2026-10-16T18:00:00+00:00"}]}
+    store=MarketStore(tmp_path/"rss.sqlite3")
+    collector=Collector(store,news=news_bundle)
+    assert collector.collect("NEWS","US",now=NOW)["status"]=="ok"
+    assert collector.collect("NEWS","KR",now=NOW)["status"]=="ok"
+    assert captured==["rss"]
+    assert len(store.latest("NEWS","US",now=NOW)["data"]["items"])==1
+    assert len(store.latest("NEWS","KR",now=NOW)["data"]["items"])==1
+
+
+def test_bounded_market_refresh_never_places_paper_orders(tmp_path):
+    path=tmp_path/"paper.sqlite3"
+    ledger=Stage1Ledger(path)
+    ledger.state("owner",date(2026,10,17))
+    portfolios=Portfolios(path)
+    before=portfolios.list("owner")["accounts"]
+    store=MarketStore.for_portfolios(portfolios)
+    def news_bundle():return {"status":"ok","items":[],"unavailable":[]}
+    def quote_unavailable(code):return {"status":"unavailable","reason":"PRICE_UNVERIFIED"}
+    collector=Collector(store,news=news_bundle,fx=fx,quote=quote_unavailable)
+    result=collector.tick("owner",portfolios,max_requests=4)
+    assert len(result["attempts"])==4
+    assert result["paper_trade_status"]=="NOT_CONNECTED"
+    assert len(portfolios.orders("owner","default")["orders"])==0
+    assert portfolios.list("owner")["accounts"]==before
+    assert set(x["kind"] for x in result["attempts"])=={"FX","NEWS","PRICE"}
+
+
+def test_sec_official_no_key_fetch_with_configured_identity():
+    import urllib.request
+    from datetime import date
+    current=date.today().isoformat()
+    official={"0":{"ticker":"AAPL","cik_str":320193}}
+    facts={"cik":320193,"facts":{"us-gaap":{"Assets":{"units":{"USD":[{
+           "form":"10-Q","filed":current,"end":current,"val":120000.0
+    }]}}}}}
+    requested=[]
+    def fake(req,timeout):
+        requested.append((req.full_url,req.headers.get("User-agent")))
+        if req.full_url.endswith("company_tickers.json"):
+            return Response(json.dumps(official).encode())
+        return Response(json.dumps(facts).encode())
+    result=sec_facts("AAPL",fetcher=fake,contact="research@example.com")
+    assert result["status"]=="ok" and result["cik"]==320193
+    assert len(requested)==2 and all("research@example.com" in x[1] for x in requested)
+    validated=validated_snapshot("FUNDAMENTALS","AAPL","SEC_EDGAR",
+                                  result["source_url"],result)
+    assert validated["payload"]["facts"][0]["tag"]=="Assets"
+    assert validated["quality"]=="RESEARCH_ONLY"
