@@ -10,6 +10,7 @@ import os
 import sqlite3
 import stat
 import tempfile
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -37,8 +38,8 @@ def online_paper_backup(portfolios,*,directory=None):
     os.close(fd)
     try:
         # Access source through the existing ownership/symlink protection.
-        with portfolios._db() as source_connection:
-            with sqlite3.connect(tmp,timeout=10) as backup_connection:
+        with closing(portfolios._db()) as source_connection:
+            with closing(sqlite3.connect(tmp,timeout=10)) as backup_connection:
                 source_connection.backup(backup_connection)
                 verified=backup_connection.execute("PRAGMA quick_check").fetchone()
                 if not verified or verified[0]!="ok":
