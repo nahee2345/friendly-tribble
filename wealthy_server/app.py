@@ -573,6 +573,10 @@ def create_app(
                             symbol=body.symbol,side=body.side,quantity=body.quantity,
                             amount_krw=int(cost),rationale="사용자 수동 주문: 30만원 이상 가상 거래 승인 필요")
                         return {"status":"approval_pending","traded":False,"request_id":body.request_id}
+                    if Decimal(str(match["amount_krw"])) < cost:
+                        return {"status":"approval_required","traded":False,
+                                "reason":"현재 검증된 비용이 승인 요청 금액을 초과했습니다.",
+                                "request_id":body.request_id}
                     if match["status"]!="APPROVED":
                         return {"status":"approval_required","traded":False,"request_id":body.request_id}
                 return portfolio_store.trade(actor.owner_id, body.portfolio, body.symbol, body.side, body.quantity, body.request_id, quote)
