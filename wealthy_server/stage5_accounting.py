@@ -45,7 +45,7 @@ def D(raw,*,max_abs=Decimal("100000000000000")):
 
 
 def s(n):
-    return format(n,"f") if n is not None else None
+    return format(n.normalize(),"f") if n is not None else None
 
 
 def stamp(text):
@@ -144,8 +144,14 @@ def _basis(orders,metadata,events_fx,now):
             owned=bucket["quantity"]
             if qty>owned:raise ValueError("negative historic inventory")
             avg=bucket["native_cost"]/owned
-            basis=avg*qty
-            profit=(price-avg)*qty
+            # Fractional average cost can be repeating (e.g. 64,000 / 6).
+            # Allocate the *total cost* proportionally to avoid cumulative
+            # pseudo-cents. A final liquidation consumes the exact remainder.
+            precision=Decimal("0.00000001")
+            basis=(bucket["native_cost"] if qty==owned else
+                (bucket["native_cost"]*qty/owned).quantize(
+                    precision,rounding=ROUND_HALF_UP))
+            profit=price*qty-basis
             bucket["realized_native"]+=profit
             if currency=="USD":
                 if (bucket["acquisition_fx_complete"] and entry_fx is not None):
@@ -157,7 +163,10 @@ def _basis(orders,metadata,events_fx,now):
             else:
                 bucket["realized_price_krw"]+=profit
             if bucket["acquisition_fx_complete"]:
-                bucket["krw_cost"]-=bucket["krw_cost"]*qty/owned
+                reduction=(bucket["krw_cost"] if qty==owned else
+                    (bucket["krw_cost"]*qty/owned).quantize(
+                        precision,rounding=ROUND_HALF_UP))
+                bucket["krw_cost"]-=reduction
             bucket["native_cost"]-=basis
             bucket["quantity"]-=qty
             closed.append({"symbol":symbol,"side":"SELL","date":order["timestamp"],
