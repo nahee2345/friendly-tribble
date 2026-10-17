@@ -413,7 +413,16 @@ def create_app(
 
         @app.post("/api/v1/stage1/preferences")
         def stage1_update_preferences(body: AllocationBody, actor: Actor = Depends(mutation_actor)) -> dict[str, Any]:
-            return preference_store.save(actor.owner_id, body.us_weight, body.etf_weight)
+            # Store user's 2 preference axes. Route *future* unallocated
+            # monthly deposits automatically; never rewrite past transfers.
+            saved = preference_store.save(actor.owner_id, body.us_weight, body.etf_weight)
+            from .stage1_bootstrap import set_funding_allocation
+            kr_total = 100 - body.us_weight
+            isa = kr_total * body.etf_weight // 100
+            domestic = kr_total - isa
+            set_funding_allocation(actor.owner_id, portfolio_store,
+                                   body.us_weight, domestic, isa)
+            return saved
 
         from .stage1_strategy_policy import StrategyPolicy, DEFAULT_WEIGHTS
         stage1_strategy_policy = StrategyPolicy(portfolio_store)
