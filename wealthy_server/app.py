@@ -374,6 +374,14 @@ def create_app(
 
         from .stage1_discovery import PreferenceStore, shortlist
         preference_store = PreferenceStore(Path(db.engine.url.database).parent / "stage1-paper.sqlite3")
+        from .stage1_bootstrap import initialize_paper_accounts
+        if market_information_auto_start:
+            from .stage1_worker import PaperWorker
+            paper_worker = PaperWorker(db, stage1, portfolio_store, preference_store)
+            app.state.paper_worker = paper_worker
+            app.router.add_event_handler("startup", paper_worker.start)
+            app.router.add_event_handler("shutdown", paper_worker.stop)
+
 
         class AllocationBody(BaseModel):
             us_weight: int = Field(ge=0, le=100)
@@ -393,7 +401,7 @@ def create_app(
 
         @app.get("/api/v1/stage1/portfolios")
         def stage1_portfolios(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
-            return portfolio_store.list(actor.owner_id)
+            return initialize_paper_accounts(actor.owner_id, stage1, portfolio_store)
 
         @app.post("/api/v1/stage1/portfolios")
         def stage1_create_portfolio(body: NewPortfolioBody, actor: Actor = Depends(mutation_actor)) -> dict[str, Any]:
