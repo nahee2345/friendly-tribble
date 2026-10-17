@@ -68,6 +68,22 @@ def _money(value, *, ceiling=MAX_PRICE, min_positive=True) -> str:
     return format(number,"f")
 
 
+def _rounded_reference_price(value) -> str:
+    # Yahoo daily adjusted-close floats commonly expose binary artifacts.
+    # Normalize only for display/research, never order execution.
+    if isinstance(value,bool) or value is None:
+        raise ValueError("invalid reference price")
+    try:
+        price=Decimal(str(value))
+    except (ValueError,TypeError,InvalidOperation):
+        raise ValueError("invalid reference price") from None
+    if not price.is_finite() or not 0<price<=MAX_PRICE:
+        raise ValueError("invalid reference price magnitude")
+    rounded=price.quantize(Decimal("0.000001"))
+    if rounded<=0:raise ValueError("reference precision underflow")
+    return format(rounded,"f")
+
+
 def _url(value, provider):
     if not isinstance(value,str) or not 8<=len(value)<=512:
         raise ValueError("missing source url")
@@ -130,7 +146,7 @@ def validated_snapshot(kind, symbol, provider, source_url, payload, *, now=None)
             day=_date(item.get("date"),now,max_age=2000)
             if last is not None and day<=last:raise ValueError("out-of-order or duplicate history date")
             last=day
-            rows.append({"date":day,"close":_money(item.get("close"))})
+            rows.append({"date":day,"close":_rounded_reference_price(item.get("close"))})
         as_of=_date(payload.get("as_of"),now,max_age=6)
         if rows[-1]["date"]!=as_of:raise ValueError("history latest-date mismatch")
         normalized={"symbol":symbol,"currency":expected,"as_of":as_of,
@@ -182,7 +198,7 @@ def validated_snapshot(kind, symbol, provider, source_url, payload, *, now=None)
             d=_date(item.get("date"),now,max_age=2000)
             if d in seen:raise ValueError("duplicate dividend event")
             seen.add(d)
-            events.append({"date":d,"amount_per_share":_money(item.get("amount_per_share"))})
+            events.append({"date":d,"amount_per_share":_rounded_reference_price(item.get("amount_per_share"))})
         events.sort(key=lambda x:x["date"])
         as_of=events[-1]["date"]
         normalized={"symbol":symbol,"currency":expected,"as_of":as_of,
