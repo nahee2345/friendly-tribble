@@ -92,7 +92,7 @@ def list_approvals(owner,portfolios):
         db.execute("BEGIN IMMEDIATE")
         schema(db)
         db.execute("""UPDATE stage1_approvals SET status='EXPIRED'
-            WHERE owner=? AND status='PENDING' AND expires_at<=?""",
+            WHERE owner=? AND status IN ('PENDING','APPROVED') AND expires_at<=?""",
             (owner,now_utc().isoformat()))
         rows=db.execute("""SELECT request_id,account,symbol,side,quantity,amount_krw,
                           rationale,status,created_at,expires_at,decided_at
