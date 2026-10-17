@@ -80,3 +80,23 @@ def test_emergency_pause_blocks_direct_db_order(tmp_path: Path):
     set_paused("owner",p,False,"사용자 모의투자 재개")
     p.trade("owner","kr-base","069500","BUY",1,"allowed-order-001",quote)
     assert len(p.orders("owner","kr-base")["orders"])==1
+
+
+def test_daily_16_card_snapshot_is_idempotent_and_marks_late(tmp_path: Path):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from wealthy_server.stage1_daily_cards import (
+        store_daily_cards_after_16,list_saved_daily_cards)
+    ledger,p,prefs,policy=environment(tmp_path)
+    before=datetime(2026,10,17,15,50,tzinfo=ZoneInfo("Asia/Seoul"))
+    after=datetime(2026,10,17,17,10,tzinfo=ZoneInfo("Asia/Seoul"))
+    assert store_daily_cards_after_16("owner",p,ledger,prefs,policy,now=before)["status"]=="not_due"
+    first=store_daily_cards_after_16("owner",p,ledger,prefs,policy,now=after)
+    assert first["status"]=="saved"
+    assert first["delayed"] is True
+    assert store_daily_cards_after_16("owner",p,ledger,prefs,policy,now=after)["status"]=="already_saved"
+    reports=list_saved_daily_cards("owner",p)["items"]
+    assert len(reports)==1
+    assert reports[0]["late_generation"] is True
+    assert reports[0]["for_date"]=="2026-10-17"
+    assert list_saved_daily_cards("other",p)["items"]==[]
