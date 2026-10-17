@@ -43,7 +43,7 @@ def _kr_daily_close(symbol: str) -> dict:
                 price=price.quantize(Decimal('1'))
                 return {'status':'ok','tradeable':True,'symbol':symbol,
                         'price':format(price,'f'),'currency':'KRW',
-                        'as_of':str(trade_date),'source':'Yahoo Finance public daily chart (unofficial)',
+                        'as_of':str(trade_date),'source':'Yahoo Finance public daily chart (unofficial)','source_url':url,
                         'delay_notice':'공개 일간 종가 기반 모의 체결. 실시간 거래 호가 아님.'}
         except (OSError,ValueError,KeyError,TypeError,IndexError,UnicodeError,
                 InvalidOperation,TimeoutError,json.JSONDecodeError):
@@ -70,6 +70,6 @@ def verified_quote(symbol:str)->dict:
         age=(datetime.now(timezone.utc).date()-quote_date).days
         price=Decimal(last['Close'])
         if not 0<=age<=4 or not price.is_finite() or price<=0 or price.as_tuple().exponent < -4:raise ValueError('stale/invalid')
-        return {'status':'ok','tradeable':True,'symbol':symbol,'price':format(price,'f'),'currency':'USD','as_of':str(quote_date),'source':'Stooq delayed daily close','delay_notice':'일간 종가 기준 모의 체결이며 실시간 호가가 아닙니다.'}
+        return {'status':'ok','tradeable':True,'symbol':symbol,'price':format(price,'f'),'currency':'USD','as_of':str(quote_date),'source':'Stooq delayed daily close','source_url':url,'delay_notice':'일간 종가 기준 모의 체결이며 실시간 호가가 아닙니다.'}
     except (OSError,ValueError,KeyError,UnicodeError,InvalidOperation,TimeoutError):
         return {'status':'unavailable','tradeable':False,'symbol':symbol,'reason':'PRICE_UNVERIFIED'}
