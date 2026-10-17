@@ -447,6 +447,22 @@ def create_app(
             paused: bool
             reason: str = Field(default="사용자 설정", max_length=200)
 
+        class InboxReadBody(BaseModel):
+            event_id: str
+
+        @app.get("/api/v1/stage1/inbox")
+        def stage1_inbox(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
+            from .stage1_inbox import inbox
+            return inbox(actor.owner_id,portfolio_store)
+
+        @app.post("/api/v1/stage1/inbox/read")
+        def stage1_inbox_read(body: InboxReadBody,actor: Actor = Depends(mutation_actor)) -> dict[str, Any]:
+            from .stage1_inbox import mark_read
+            try:
+                return mark_read(actor.owner_id,portfolio_store,body.event_id)
+            except ValueError:
+                raise _error(404,"INBOX_ITEM_NOT_FOUND","읽음 처리할 알림을 찾을 수 없습니다.") from None
+
         @app.get("/api/v1/stage1/backups")
         def stage1_list_backups(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
             from .stage1_backup import list_paper_backups
