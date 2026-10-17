@@ -200,3 +200,47 @@ def test_sec_signed_facts_are_research_only():
               payload,now=NOW)
     assert normalized["payload"]["facts"][0]["value"]=="-200000"
     assert normalized["payload"]["ratios_computed"] is False
+
+
+def test_same_close_reverified_without_mutating_immutable_observation(tmp_path):
+    store=MarketStore(tmp_path/"cache.sqlite3")
+    first=validated_snapshot("PRICE","AAPL","STOOQ",URL_STOOQ,quote(),now=NOW)
+    assert store.save(first)["saved"] is True
+    again=validated_snapshot("PRICE","AAPL","STOOQ",URL_STOOQ,quote(),
+                             now=NOW+timedelta(hours=2))
+    assert store.save(again)["saved"] is False
+    entry=store.latest("PRICE","AAPL",now=NOW+timedelta(hours=2))
+    assert entry["status"]=="ok" and entry["age_seconds"]==0
+    assert entry["recorded_utc"]==NOW.isoformat()
+    assert entry["last_verified_utc"]==(NOW+timedelta(hours=2)).isoformat()
+    assert store.health()["snapshots"]=={"PRICE":1}
+
+
+def test_reverted_close_becomes_latest_without_rewriting_old_price(tmp_path):
+    store=MarketStore(tmp_path/"cache.sqlite3")
+    old=validated_snapshot("PRICE","AAPL","STOOQ",URL_STOOQ,quote(),now=NOW)
+    changed=validated_snapshot("PRICE","AAPL","STOOQ",URL_STOOQ,
+                               {**quote(),"price":"181.20"},
+                               now=NOW+timedelta(hours=1))
+    reverted=validated_snapshot("PRICE","AAPL","STOOQ",URL_STOOQ,quote(),
+                                now=NOW+timedelta(hours=2))
+    assert store.save(old)["saved"]
+    assert store.save(changed)["saved"]
+    assert store.save(reverted)["saved"] is False
+    current=store.latest("PRICE","AAPL",now=NOW+timedelta(hours=2))
+    assert current["data"]["price"]=="180.25"
+    assert current["last_verified_utc"]==(NOW+timedelta(hours=2)).isoformat()
+    assert store.health()["snapshots"]=={"PRICE":2}
+
+
+def test_backdated_attempt_cannot_supersede_newer_verified_reference(tmp_path):
+    store=MarketStore(tmp_path/"cache.sqlite3")
+    fresh=validated_snapshot("PRICE","AAPL","STOOQ",URL_STOOQ,quote(),
+                             now=NOW+timedelta(hours=3))
+    stale=validated_snapshot("PRICE","AAPL","STOOQ",URL_STOOQ,
+                             {**quote(),"price":"150.00"},now=NOW)
+    store.save(fresh)
+    store.save(stale)
+    current=store.latest("PRICE","AAPL",now=NOW+timedelta(hours=3))
+    assert current["data"]["price"]=="180.25"
+    assert current["status"]=="ok"
