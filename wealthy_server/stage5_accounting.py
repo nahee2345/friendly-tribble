@@ -262,12 +262,58 @@ def xirr(flows,valuation,at):
             "does_not_predict_future":True}
 
 
+def _snapshot_digest(owner,day,observed,nav,sources,ledger_hash):
+    raw=json.dumps([owner,day,observed,nav,sources,ledger_hash],
+                   ensure_ascii=False,separators=(",",":"))
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def _ledger_digest(owner,raw_orders,raw_meta,cash_events,transfers,accounting,corporate):
+    groups=(raw_orders,raw_meta,cash_events,transfers,accounting,corporate)
+    if sum(len(group) for group in groups)>50000:
+        raise ValueError("too many transactions for bounded accounting")
+    def normalized(rows):
+        values=[list(row) for row in rows]
+        return sorted(values,key=lambda row:json.dumps(
+            row,ensure_ascii=False,separators=(",",":")))
+    doc={"owner":owner,"groups":[normalized(rows) for rows in groups]}
+    return hashlib.sha256(json.dumps(doc,ensure_ascii=False,sort_keys=True,
+        separators=(",",":")).encode()).hexdigest()
+
+
+def _current_ledger_digest(db,owner):
+    """Read one owner within an existing SQLite transaction and hash all
+    accounting inputs, including transaction timestamps and fee metadata."""
+    orders=db.execute("""SELECT portfolio,request_id,symbol,side,quantity,
+      price,currency,source,as_of,created_at
+      FROM virtual_orders WHERE owner=?""",(owner,)).fetchall()
+    meta=db.execute("""SELECT portfolio,order_key,foreign_exchange_rate,
+      fee_amount,tax_amount,costs_currency,source
+      FROM stage1_trade_metadata WHERE owner=?""",(owner,)).fetchall()
+    cash=db.execute("""SELECT event_key,kind,amount_krw,amount_usd,rate,created_utc
+      FROM stage1_events WHERE owner=?""",(owner,)).fetchall()
+    transfers=db.execute("""SELECT source,destination,amount_krw
+      FROM portfolio_transfers WHERE owner=?""",(owner,)).fetchall()
+    accounting=db.execute("""SELECT portfolio,event_key,category,amount,currency,
+      status,reference FROM stage1_accounting_events WHERE owner=?""",(owner,)).fetchall()
+    corp=db.execute("""SELECT symbol,category,status FROM stage1_corporate_events
+      WHERE owner=?""",(owner,)).fetchall()
+    return _ledger_digest(owner,orders,meta,cash,transfers,accounting,corp)
+
+
 def _tables(db):
     db.execute("""CREATE TABLE IF NOT EXISTS stage5_nav_snapshots(
       owner TEXT NOT NULL,as_of_day TEXT NOT NULL,
       observed_utc TEXT NOT NULL,nav_krw TEXT NOT NULL,
-      sources_sha256 TEXT NOT NULL,
+      sources_sha256 TEXT NOT NULL,ledger_sha256 TEXT,
+      snapshot_sha256 TEXT,
       PRIMARY KEY(owner,as_of_day))""")
+    # Existing Stage5 preview DBs can have only the earlier five columns.
+    # Do not rewrite old rows: missing digests remain explicitly untrusted.
+    names={row[1] for row in db.execute("PRAGMA table_info(stage5_nav_snapshots)")}
+    for key in ("ledger_sha256","snapshot_sha256"):
+        if key not in names:
+            db.execute(f"ALTER TABLE stage5_nav_snapshots ADD COLUMN {key} TEXT")
 
 
 def twr_from_verified_snapshots(rows,flow_rows):
@@ -328,8 +374,11 @@ class AccountingEngine:
                 stage1_corporate_events WHERE owner=?""",(owner,)).fetchall()
             _tables(db)
             nav_rows=db.execute("""SELECT as_of_day,observed_utc,nav_krw,
-              sources_sha256 FROM stage5_nav_snapshots WHERE owner=?
+              sources_sha256,ledger_sha256,snapshot_sha256
+              FROM stage5_nav_snapshots WHERE owner=?
               ORDER BY as_of_day DESC LIMIT 180""",(owner,)).fetchall()
+            ledger_hash=_ledger_digest(owner,raw_orders,raw_meta,cash_events,
+                                      transfers,accounting,corporate)
             db.execute("COMMIT")
         event_map={key:rate for key,kind,_,_,rate,_ in cash_events
                    if kind=="virtual_fx" and rate is not None}
@@ -459,10 +508,18 @@ class AccountingEngine:
         result_xirr=xirr([(amount,created) for _,created,amount in flows],
                          nav,now) if full else {"status":"unavailable","pct":None,
                                                  "reason":"NAV_INCOMPLETE"}
-        twr=twr_from_verified_snapshots([
-            {"as_of_day":day,"observed_utc":observed_at,"nav_krw":amount,
-             "sources_sha256":digest}
-            for day,observed_at,amount,digest in reversed(nav_rows)],flows)
+        history_valid=all(ledger_ref is not None and digest is not None
+            and digest==_snapshot_digest(owner,day,observed_at,amount,
+                                        sources,ledger_ref)
+            for day,observed_at,amount,sources,ledger_ref,digest in nav_rows)
+        if history_valid:
+            twr=twr_from_verified_snapshots([
+                {"as_of_day":day,"observed_utc":observed_at,"nav_krw":amount,
+                 "sources_sha256":sources}
+                for day,observed_at,amount,sources,_,_ in reversed(nav_rows)],flows)
+        else:
+            twr={"status":"unavailable","pct":None,
+                 "reason":"NAV_SNAPSHOT_INTEGRITY_FAILED"}
         outstanding=[{"account":account,"event":key,"category":category,
                       "amount":amount,"currency":currency,"status":status,
                       "cash_posted":False,"reference":reference}
@@ -509,6 +566,7 @@ class AccountingEngine:
                      "fee_records_and_history":fees,
                      "not_deducted_from_cash":True},
                 "cash_flows":cash_flows,
+                "ledger_sha256":ledger_hash,
                 "xirr":result_xirr,"twr":twr,
                 "tax_illustrations":tax,
                 "missing":problems,
@@ -542,14 +600,23 @@ class AccountingEngine:
                 for x in report["source_evidence"]]
         evidence_hash=hashlib.sha256(json.dumps(sorted(values),
              separators=(",",":")).encode()).hexdigest()
+        captured_at=now.astimezone(timezone.utc).isoformat()
+        day=local.date().isoformat()
+        snapshot_digest=_snapshot_digest(owner,day,captured_at,
+              report["market_valuation_krw"],evidence_hash,report["ledger_sha256"])
         with self.portfolios._db() as db:
             db.execute("BEGIN IMMEDIATE")
             _tables(db)
+            if _current_ledger_digest(db,owner)!=report["ledger_sha256"]:
+                db.execute("COMMIT")
+                return {"status":"ledger_changed","saved":False,
+                        "reason":["평가 중 가상 거래·입금·회계 자료가 변경되어 재조회가 필요합니다."]}
             db.execute("""INSERT OR IGNORE INTO stage5_nav_snapshots
-                (owner,as_of_day,observed_utc,nav_krw,sources_sha256)
-                VALUES(?,?,?,?,?)""",
-                (owner,local.date().isoformat(),now.astimezone(timezone.utc).isoformat(),
-                 report["market_valuation_krw"],evidence_hash))
+                (owner,as_of_day,observed_utc,nav_krw,sources_sha256,
+                 ledger_sha256,snapshot_sha256)
+                VALUES(?,?,?,?,?,?,?)""",
+                (owner,day,captured_at,report["market_valuation_krw"],
+                 evidence_hash,report["ledger_sha256"],snapshot_digest))
             inserted=db.execute("SELECT changes()").fetchone()[0]==1
             db.execute("COMMIT")
         return {"status":"saved" if inserted else "already_saved",
