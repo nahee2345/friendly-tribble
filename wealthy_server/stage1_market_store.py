@@ -217,7 +217,7 @@ def validated_snapshot(kind, symbol, provider, source_url, payload, *, now=None)
             raise ValueError("missing SEC facts")
         output=[]
         for item in facts:
-            if not isinstance(item,dict) or item.get("unit") not in ("USD","shares"):
+            if not isinstance(item,dict) or item.get("unit") not in ("USD","shares","USD/shares"):
                 raise ValueError("invalid SEC fact")
             filed=_date(item.get("filed"),now,max_age=2000)
             period=_date(item.get("period_end"),now,max_age=2000)
