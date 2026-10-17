@@ -155,10 +155,26 @@ def recorded_claims(owner,portfolios,*,limit=30):
             quantity,notional_krw,status,reason,created_utc,updated_utc
             FROM stage4_execution_claims WHERE owner=?
             ORDER BY created_utc DESC LIMIT ?""",(owner,limit)).fetchall()
+        ledger=db.execute("""SELECT portfolio,request_id,symbol,side,quantity
+            FROM virtual_orders WHERE owner=? AND request_id LIKE 's4:%'""",
+            (owner,)).fetchall()
     keys=("request_id","plan_hash","account","symbol","side","quantity",
           "notional_krw","status","reason","created_utc","updated_utc")
-    return {"items":[dict(zip(keys,row)) for row in rows],
-            "notice":"CLAIMED는 실행 결과 미대조 상태이며 자동 재실행되지 않습니다."}
+    executions={(account,request): (symbol,side,qty)
+                for account,request,symbol,side,qty in ledger}
+    items=[]
+    for row in rows:
+        item=dict(zip(keys,row))
+        actual=executions.get((item["account"],item["request_id"]))
+        item["ledger_order_verified"]=(actual==
+            (item["symbol"],item["side"],item["quantity"]))
+        item["needs_manual_reconciliation"]=(
+            item["status"]=="CLAIMED" or
+            (item["status"]=="EXECUTED" and not item["ledger_order_verified"]) or
+            (item["status"]=="REJECTED" and item["ledger_order_verified"]))
+        items.append(item)
+    return {"items":items,
+            "notice":"미대조·상태 불일치는 자동 재실행하지 않고 주문 원장과 수동 대조합니다."}
 
 
 class PortfolioEngine:
