@@ -415,6 +415,16 @@ def create_app(
         def stage1_update_preferences(body: AllocationBody, actor: Actor = Depends(mutation_actor)) -> dict[str, Any]:
             return preference_store.save(actor.owner_id, body.us_weight, body.etf_weight)
 
+        @app.get("/api/v1/stage1/research/{symbol}")
+        def stage1_research(symbol: str, actor: Actor = Depends(current_actor)) -> dict[str, Any]:
+            from .stage1_analytics import fetch_daily_history, research_summary
+            from .stage1_discovery import CANDIDATES
+            # Bounded, maintained set of symbols; avoids an arbitrary symbol scraping proxy.
+            allowed = {row[0] for row in CANDIDATES}
+            if symbol not in allowed:
+                raise _error(400, "RESEARCH_SYMBOL_NOT_ALLOWED", "분석 대상 목록에서 선택해 주세요.")
+            return research_summary(fetch_daily_history(symbol), fees_bps=10)
+
         @app.get("/api/v1/stage1/candidates")
         def stage1_candidates(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
             return shortlist(preference_store.get(actor.owner_id))
