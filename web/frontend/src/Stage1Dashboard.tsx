@@ -37,6 +37,7 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
   const [error,setError]=useState('');
   const [busy,setBusy]=useState(false);
   const [detail,setDetail]=useState<Recommendation|null>(null);
+  const [selectedRisk,setSelectedRisk]=useState<News|null>(null);
   const [slide,setSlide]=useState(0);
   const [trend,setTrend]=useState<PriceTrend|null>(null);
   const [query,setQuery]=useState('');
@@ -100,7 +101,7 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
           {!news?.news.length&&<p>최근 30일 기사를 아직 확인하지 못했습니다.</p>}</div>
         <small className="wh-caveat">제목 기반 관련성 분석이며 실제 가격 영향은 미확인입니다.</small></section>
       <section className="wh-card wh-risks"><div className="wh-head"><b>보유종목 위험 알림</b><small>{news?.summary.risk_suspected??0}건 의심 · 원문 연결</small></div>
-        {(news?.risk_suspected??[]).slice(0,3).map((n,i)=><a className="wh-riskrow" href={n.url} key={i} target="_blank" rel="noreferrer"><b>{n.symbols.join(', ')}</b> {n.title}</a>)}
+        {(news?.risk_suspected??[]).slice(0,3).map((n,i)=><button className="wh-riskrow" key={i} onClick={()=>setSelectedRisk(n)}><b>{n.symbols.join(', ')}</b> {n.title}</button>)}
         {!news?.risk_suspected.length&&<p>현재 수집 범위에서 보유종목 관련 부정 제목을 확인하지 못했습니다.</p>}
         <small className="wh-caveat">뉴스가 손실을 확정한다는 뜻이 아닙니다. 서버 가동 중 확인 후 알림함에 저장됩니다.</small></section>
       <section className="wh-card wh-recs"><div className="wh-head"><b>자동 투자 검토 종목</b><small>누르면 추천 근거 카드뉴스</small></div><div className="wh-reclist">
@@ -119,6 +120,17 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
          <p>종목 검색은 자동매수 승인과 다릅니다. 검증되지 않은 데이터는 체결에 사용하지 않습니다.</p></>:<p>왼쪽에서 종목을 선택해 주세요.</p>}
          <small>{catalog?.notice??'종목목록 범위 확인 중'}</small></div></div>
       </main>}
+    {selectedRisk&&<div className="wh-overlay" onClick={()=>setSelectedRisk(null)}>
+      <div className="wh-modal" role="dialog" aria-modal="true" aria-label="보유종목 위험 근거" onClick={e=>e.stopPropagation()}>
+        <div className="wh-head"><b>보유종목 뉴스 위험 검토 · {selectedRisk.symbols.join(', ')}</b><button onClick={()=>setSelectedRisk(null)} aria-label="닫기">✕</button></div>
+        <div className="wh-slide"><h3>{selectedRisk.impact}</h3><p>{selectedRisk.title}</p>
+          <p><b>판단 근거:</b> {selectedRisk.reason}</p>
+          <p><b>검증 수준:</b> {selectedRisk.confidence}</p>
+          <p><b>뉴스 발행:</b> {selectedRisk.published_utc.slice(0,10)} · {selectedRisk.source}</p>
+          <p>이 뉴스만으로 자동 매도하지 않습니다. 실제 기업 손익 및 주가 인과관계는 추가 검증이 필요합니다.</p>
+          <p><a href={selectedRisk.url} target="_blank" rel="noreferrer">기사 원문 확인 ↗</a></p>
+        </div>
+      </div></div>}
     {detail&&<div className="wh-overlay" onClick={()=>setDetail(null)}><div className="wh-modal" role="dialog" aria-modal="true" aria-label="투자 근거 카드뉴스" onClick={e=>e.stopPropagation()}>
        <div className="wh-head"><b>{detail.symbol} · {slides[slide].head}</b><button onClick={()=>setDetail(null)} aria-label="닫기">✕</button></div>
        <div className="wh-slide">{slides[slide].body}</div>
