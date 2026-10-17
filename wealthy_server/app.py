@@ -443,6 +443,39 @@ def create_app(
                 raise _error(400, "INVALID_STRATEGY_WEIGHTS",
                              "8개 투자전략의 정수 비율을 합계 100%로 입력하세요.") from None
 
+        class PaperPauseBody(BaseModel):
+            paused: bool
+            reason: str = Field(default="사용자 설정", max_length=200)
+
+        @app.get("/api/v1/stage1/trade-control")
+        def stage1_trade_control(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
+            from .stage1_controls import status
+            return status(actor.owner_id, portfolio_store)
+
+        @app.post("/api/v1/stage1/trade-control")
+        def stage1_set_trade_control(body: PaperPauseBody,
+                                     actor: Actor = Depends(mutation_actor)) -> dict[str, Any]:
+            from .stage1_controls import set_paused
+            return set_paused(actor.owner_id, portfolio_store, body.paused, body.reason)
+
+        class PaperApprovalDecision(BaseModel):
+            request_id: str
+            approve: bool
+
+        @app.get("/api/v1/stage1/approvals")
+        def stage1_approval_list(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
+            from .stage1_controls import list_approvals
+            return list_approvals(actor.owner_id, portfolio_store)
+
+        @app.post("/api/v1/stage1/approvals/decide")
+        def stage1_approval_decide(body: PaperApprovalDecision,
+                                   actor: Actor = Depends(mutation_actor)) -> dict[str, Any]:
+            from .stage1_controls import decide_approval
+            try:
+                return decide_approval(actor.owner_id, portfolio_store, body.request_id, body.approve)
+            except ValueError:
+                raise _error(400,"APPROVAL_NOT_PENDING","승인 대기 중인 유효한 요청만 처리할 수 있습니다.") from None
+
         @app.get("/api/v1/stage1/news-impact")
         def stage1_news_impact(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
             from .stage1_news_impact import portfolio_news_impacts
@@ -514,8 +547,34 @@ def create_app(
         @app.post("/api/v1/stage1/order")
         def stage1_order(body: VirtualOrderBody, actor: Actor = Depends(mutation_actor)) -> dict[str, Any]:
             from .stage1_quotes import verified_quote
+            from .stage1_controls import status, request_approval, list_approvals
+            if status(actor.owner_id, portfolio_store)["paused"]:
+                raise _error(409,"PAPER_PAUSED","가상거래가 중지되어 있습니다.")
             try:
                 quote=verified_quote(body.symbol)
+                from decimal import Decimal
+                price=Decimal(str(quote["price"]))
+                cost=price*body.quantity
+                if quote.get("currency")=="USD":
+                    from .stage1_research import current_fx
+                    fx=current_fx()
+                    if fx.get("status")!="ok":
+                        raise _error(422,"FX_UNVERIFIED","환율을 확인할 수 없어 큰 주문을 보류합니다.")
+                    cost*=Decimal(str(fx["usd_krw"]))
+                if cost>=300000:
+                    pending=list_approvals(actor.owner_id,portfolio_store)["items"]
+                    match=next((x for x in pending if x["request_id"]==body.request_id
+                                and x["account"]==body.portfolio
+                                and x["symbol"]==body.symbol and x["side"]==body.side
+                                and x["quantity"]==body.quantity),None)
+                    if match is None:
+                        request_approval(actor.owner_id,portfolio_store,
+                            request_id=body.request_id,account=body.portfolio,
+                            symbol=body.symbol,side=body.side,quantity=body.quantity,
+                            amount_krw=int(cost),rationale="사용자 수동 주문: 30만원 이상 가상 거래 승인 필요")
+                        return {"status":"approval_pending","traded":False,"request_id":body.request_id}
+                    if match["status"]!="APPROVED":
+                        return {"status":"approval_required","traded":False,"request_id":body.request_id}
                 return portfolio_store.trade(actor.owner_id, body.portfolio, body.symbol, body.side, body.quantity, body.request_id, quote)
             except (ValueError, KeyError, ArithmeticError):
                 raise _error(400, "PAPER_ORDER_REJECTED", "시세·계좌·잔고 또는 주문 정보를 확인해 주세요.") from None
@@ -540,6 +599,9 @@ def create_app(
         @app.post("/api/v1/stage1/auto-run")
         def stage1_auto_run(actor: Actor = Depends(mutation_actor)) -> dict[str, Any]:
             """A single explicitly requested simulated ETF investment; no brokerage."""
+            from .stage1_controls import status
+            if status(actor.owner_id, portfolio_store)["paused"]:
+                return {"status":"paused","traded":False,"reason":"가상거래 긴급 중지 중"}
             from .stage1_autorun import paper_run_once
             try:
                 return paper_run_once(actor.owner_id, stage1, portfolio_store, preference_store)
