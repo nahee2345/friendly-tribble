@@ -26,6 +26,7 @@ export function Stage1Page(){
   const [fundingPolicy,setFundingPolicy]=useState({us_pct:80,kr_pct:10,isa_pct:10});
   const strategyLabels:Record<string,string>={index:'장기지수',value:'가치',quality_growth:'우량성장',growth:'성장',high_dividend:'고배당',dividend_growth:'배당성장',momentum:'모멘텀',asset_allocation:'자산배분'};
   const [strategyWeights,setStrategyWeights]=useState<Record<string,number>>({index:30,value:10,quality_growth:10,growth:10,high_dividend:10,dividend_growth:10,momentum:10,asset_allocation:10});
+  const [strategyLock,setStrategyLock]=useState<{locked:boolean;next_change_at:string|null}>({locked:false,next_change_at:null});
   type Decision={symbol:string;name:string;region:string;kind:string;account:string;status:string;decision:string;priority_score:number;quantity_suggestion:number;price:string|null;currency:string;holding_horizon:string;exit_review:string;why:string[];risks:string[];as_of?:string};
   const [decisionReport,setDecisionReport]=useState<{reserve_percent:number;reserve_target_krw:string;recommendations:Decision[];coverage_limitations:string[];fx_valid:boolean}|null>(null);
   type Impact={outcome:string;symbols:string[];confidence:string;reason:string;title:string;original:string;url:string;published:string;action:string};
@@ -33,7 +34,7 @@ export function Stage1Page(){
   const [decisionBusy,setDecisionBusy]=useState(false);
   async function refreshDecisions(){setDecisionBusy(true);try{setDecisionReport(await get<NonNullable<typeof decisionReport>>('/api/v1/stage1/decisions'));}catch(e){setError(String(e));}finally{setDecisionBusy(false);}}
   async function refreshImpacts(){try{setImpactReport(await get<NonNullable<typeof impactReport>>('/api/v1/stage1/news-impact'));}catch(e){setError(String(e));}}
-  async function saveStrategyWeights(){await action(()=>post('/api/v1/stage1/strategy-weights',{weights:strategyWeights}),'전략별 비중을 저장했습니다.');void refreshDecisions();}
+  async function saveStrategyWeights(){await action(async()=>{const r=await post<{weights:Record<string,number>;locked:boolean;next_change_at:string|null}>('/api/v1/stage1/strategy-weights',{weights:strategyWeights});setStrategyWeights(r.weights);setStrategyLock(r);},'전략 비중이 적용됐습니다. 변경은 14일 후 가능합니다.');void refreshDecisions();}
 
   type ReportCard={id:number;title:string;status:string;result:string;detail:string};
   const [reportCards,setReportCards]=useState<ReportCard[]>([]);
@@ -66,7 +67,7 @@ export function Stage1Page(){
   async function decideApproval(request_id:string,approve:boolean){await action(async()=>{const r=await post<{items:Approval[]}>('/api/v1/stage1/approvals/decide',{request_id,approve});setApprovals(r.items);},approve?'가상 주문 승인을 기록했습니다. 실제 체결은 별도 재검증 필요.':'승인 요청을 거부했습니다.');}
 
   async function refresh(){try{const f=await get<State>('/api/v1/stage1/account');get<typeof performance>('/api/v1/stage1/performance').then(x=>setPerformance(x)).catch(()=>setPerformance(null));const p=await get<{accounts:A[]}>('/api/v1/stage1/portfolios');setFund(f);setAccounts(p.accounts);setError('');}catch(e){setError(String(e));}}
-  useEffect(()=>{void refresh();void reloadControls();void refreshCards();void refreshCardHistory();get<typeof preferences>('/api/v1/stage1/preferences').then(setPreferences).catch(()=>{});get<{weights:Record<string,number>}>('/api/v1/stage1/strategy-weights').then(r=>setStrategyWeights(r.weights)).catch(()=>{});void refreshDecisions();void refreshImpacts();get<typeof fundingPolicy>('/api/v1/stage1/funding-allocation').then(setFundingPolicy).catch(()=>{});get<{items:typeof dailyReports}>('/api/v1/stage1/daily-reports').then(x=>setDailyReports(x.items)).catch(()=>{});void discover();get<{status:string;usd_krw?:string;as_of?:string}>('/api/v1/stage1/fx').then(setFx).catch(()=>{});(['US','KR'] as const).forEach(region=>get<{items:Article[]}>('/api/v1/stage1/news/'+region).then(x=>setNews(prev=>({...prev,[region]:x.items||[]}))).catch(()=>{}));},[]);
+  useEffect(()=>{void refresh();void reloadControls();void refreshCards();void refreshCardHistory();get<typeof preferences>('/api/v1/stage1/preferences').then(setPreferences).catch(()=>{});get<{weights:Record<string,number>;locked:boolean;next_change_at:string|null}>('/api/v1/stage1/strategy-weights').then(r=>{setStrategyWeights(r.weights);setStrategyLock(r);}).catch(()=>{});void refreshDecisions();void refreshImpacts();get<typeof fundingPolicy>('/api/v1/stage1/funding-allocation').then(setFundingPolicy).catch(()=>{});get<{items:typeof dailyReports}>('/api/v1/stage1/daily-reports').then(x=>setDailyReports(x.items)).catch(()=>{});void discover();get<{status:string;usd_krw?:string;as_of?:string}>('/api/v1/stage1/fx').then(setFx).catch(()=>{});(['US','KR'] as const).forEach(region=>get<{items:Article[]}>('/api/v1/stage1/news/'+region).then(x=>setNews(prev=>({...prev,[region]:x.items||[]}))).catch(()=>{}));},[]);
   useEffect(()=>{let active=true;const fetchStatus=()=>{get<{enabled:boolean;last_checked_at:string|null;last_result:{status:string;reason?:string;symbol?:string}}>('/api/v1/stage1/auto-status').then(x=>{if(active)setAuto(x);}).catch(()=>{});};fetchStatus();const handle=setInterval(fetchStatus,60_000);return()=>{active=false;clearInterval(handle);};},[]);
   useEffect(()=>{get<{orders:typeof orders}>(`/api/v1/stage1/portfolios/${encodeURIComponent(selected)}/orders`).then(x=>setOrders(x.orders)).catch(()=>setOrders([]));},[selected,accounts.length]);
   const current=accounts.find(x=>x.id===selected)||accounts[0];
@@ -121,8 +122,8 @@ export function Stage1Page(){
     {section==='discover'&&<div className="s1-discovery">
       <section className="s1-panel s1-preferences"><div className="s1-panelhead"><h2>사용자 입력 · 투자전략 비중 8개</h2><span>합계 100%</span></div>
         <div className="s1-preference-grid">{Object.entries(strategyLabels).map(([id,label])=><label key={id}>{label} {strategyWeights[id]??0}%<input type="number" min="0" max="100" value={strategyWeights[id]??0} onChange={e=>setStrategyWeights(prev=>({...prev,[id]:Number(e.target.value)}))}/></label>)}</div>
-        <p>합계: {Object.values(strategyWeights).reduce((a,b)=>a+b,0)}%</p>
-        <button className="s1-primary" disabled={busy||Object.values(strategyWeights).reduce((a,b)=>a+b,0)!==100} onClick={()=>void saveStrategyWeights()}>투자전략 비율 저장</button>
+        <p>합계: {Object.values(strategyWeights).reduce((a,b)=>a+b,0)}%</p><p className="s1-desc">{strategyLock.locked?'현재 적용 전략은 변경 제한 중입니다. 다음 변경 가능일: '+strategyLock.next_change_at:'전략 변경을 적용하면 14일간 수정이 제한됩니다.'}</p>
+        <button className="s1-primary" disabled={busy||strategyLock.locked||Object.values(strategyWeights).reduce((a,b)=>a+b,0)!==100} onClick={()=>void saveStrategyWeights()}>투자전략 비율 저장</button>
         <p className="s1-desc">전략별 비중 외에 종목·계좌·현금 보유량은 프로그램이 계산합니다. 재무자료를 검증하지 못한 전략의 실전 투자 신호는 생성하지 않습니다.</p>
       </section>
       <section className="s1-panel s1-preferences"><div className="s1-panelhead"><h2>모의투자 선호 설정</h2><span>사용자별 저장</span></div>
