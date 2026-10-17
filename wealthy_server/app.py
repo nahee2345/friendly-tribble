@@ -517,6 +517,17 @@ def create_app(
             from .stage1_hub import review_news
             return review_news(actor.owner_id,portfolio_store,notify=True)
 
+        @app.get("/api/v1/stage1/last-30d/{symbol}")
+        def stage1_price_30d(symbol: str, actor: Actor = Depends(current_actor)) -> dict[str, Any]:
+            from .stage1_catalog import ensure_seed,search
+            from .stage1_history30 import last_30_days
+            ensure_seed(portfolio_store)
+            matches=search(portfolio_store,symbol,limit=10)["items"]
+            row=next((x for x in matches if x["symbol"]==symbol),None)
+            if row is None:
+                raise _error(404,"SECURITY_NOT_IN_CATALOG","공개 종목목록에 있는 종목부터 확인해 주세요.")
+            return last_30_days(row["market"],row["symbol"])
+
         @app.get("/api/v1/stage1/securities")
         def stage1_securities(q: str = "", market: str = "ALL",
                               kind: str = "ALL", limit: int = 50,
