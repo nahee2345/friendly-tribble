@@ -21,7 +21,7 @@ def paper_exit_review(owner, portfolios, *, today=None, quote_provider=verified_
     events=[]
     accounts=portfolios.list(owner)['accounts']
     for account in accounts:
-        historical=portfolios.orders(owner,account['id'])['orders']
+        historical=portfolios.orders(owner,account['id'],limit=100000)['orders']
         for holding in account['holdings']:
             symbol=holding['symbol']
             qty=int(holding['quantity'])
