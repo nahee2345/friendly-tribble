@@ -387,6 +387,26 @@ def create_app(
             us_weight: int = Field(ge=0, le=100)
             etf_weight: int = Field(ge=0, le=100)
 
+        class FundingAllocationBody(BaseModel):
+            us_pct: int = Field(ge=0, le=100)
+            kr_pct: int = Field(ge=0, le=100)
+            isa_pct: int = Field(ge=0, le=100)
+
+        @app.get("/api/v1/stage1/funding-allocation")
+        def stage1_get_funding_allocation(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
+            from .stage1_bootstrap import get_funding_allocation
+            return get_funding_allocation(actor.owner_id, portfolio_store)
+
+        @app.post("/api/v1/stage1/funding-allocation")
+        def stage1_set_funding_allocation(body: FundingAllocationBody,
+                                          actor: Actor = Depends(mutation_actor)) -> dict[str, Any]:
+            from .stage1_bootstrap import set_funding_allocation
+            try:
+                return set_funding_allocation(actor.owner_id, portfolio_store,
+                                              body.us_pct, body.kr_pct, body.isa_pct)
+            except ValueError:
+                raise _error(400, "INVALID_FUNDING_ALLOCATION", "배분 비율의 합계가 100%여야 합니다.") from None
+
         @app.get("/api/v1/stage1/preferences")
         def stage1_preferences(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
             return preference_store.get(actor.owner_id)
