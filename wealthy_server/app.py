@@ -447,6 +447,20 @@ def create_app(
             paused: bool
             reason: str = Field(default="사용자 설정", max_length=200)
 
+        @app.get("/api/v1/stage1/backups")
+        def stage1_list_backups(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
+            from .stage1_backup import list_paper_backups
+            return list_paper_backups(portfolio_store)
+
+        @app.post("/api/v1/stage1/backups")
+        def stage1_create_backup(actor: Actor = Depends(mutation_actor)) -> dict[str, Any]:
+            from .stage1_backup import online_paper_backup
+            try:
+                return online_paper_backup(portfolio_store)
+            except (ValueError, OSError):
+                raise _error(500, "PAPER_BACKUP_FAILED",
+                             "가상계좌 온라인 백업 무결성 또는 저장 경로 검사에 실패했습니다.") from None
+
         @app.get("/api/v1/stage1/trade-control")
         def stage1_trade_control(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
             from .stage1_controls import status
