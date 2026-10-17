@@ -10,13 +10,16 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 
-def save_daily_paper_report(owner, portfolios, *, us, domestic, exits):
+def save_daily_paper_report(owner, portfolios, *, us, domestic, exits,
+                            us_stocks=None, kr_stocks=None):
     now=datetime.now(ZoneInfo('Asia/Seoul'))
     date=now.date().isoformat()
     summary={
         'date':date, 'checked_at':now.isoformat(),
         'us':{key:us.get(key) for key in ('status','traded','symbol','quantity','reason','price_usd')},
         'domestic':domestic.get('results',[]),
+        'us_stocks':us_stocks or {'status':'not_reviewed'},
+        'kr_stocks':kr_stocks or {'status':'not_reviewed'},
         'exits':exits.get('events',[]),
         'price_note':'일간 종가 가상거래. 시세 미확인 시 거래 없음.',
         'execution':'SIMULATED_ONLY',
