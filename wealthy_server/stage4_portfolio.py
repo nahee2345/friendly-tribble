@@ -356,7 +356,7 @@ class PortfolioEngine:
                         "coverage_pct":result["coverage_pct"],
                         "source_hash":observations[("PRICE",symbol)]["sha256"],
                         "reason":f"목표 대비 {market}/{kind} 부족 {str(deficit.quantize(Decimal('.01')))}원; "
-                                 f"8전략 점수 {result['score']}점·검증자료 {result['coverage_pct']}%"}
+                                 f"8전략 점수 {result['score']}점·검증자료 {result['coverage_pct']}%"})
                     pending_by_account[account_id]=pending_by_account.get(account_id,Decimal(0))+cost
                     remaining-=cost
                     break
