@@ -37,6 +37,38 @@ def _translate_headline(title: str) -> str | None:
     except (ValueError,KeyError,TypeError,OSError,TimeoutError,json.JSONDecodeError):
         return None
 
+def _translate_google_public(title: str) -> str | None:
+    """Best-effort backup for public headlines; no claim of SLA or accuracy.
+
+    Google's undocumented public endpoint can change, be rate limited or block
+    requests. No private user text is sent. Never label an unchanged English
+    headline as a completed Korean translation.
+    """
+    if not title or len(title)>400:
+        return None
+    params=urllib.parse.urlencode(
+        {'client':'gtx','sl':'en','tl':'ko','dt':'t','q':title})
+    url='https://translate.googleapis.com/translate_a/single?'+params
+    try:
+        req=urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0'})
+        with urllib.request.urlopen(req,timeout=4) as response:
+            raw=response.read(16_001)
+        if len(raw)>16_000:return None
+        data=json.loads(raw)
+        translated=''.join(piece[0] for piece in data[0] if isinstance(piece,list)
+                            and piece and isinstance(piece[0],str)).strip()
+        if not translated or not any('가'<=char<='힣' for char in translated):
+            return None
+        return html.unescape(translated)[:400]
+    except (OSError,ValueError,KeyError,TypeError,IndexError,TimeoutError,
+            json.JSONDecodeError):
+        return None
+
+
+def translate_headline_redundant(title: str) -> str | None:
+    return _translate_headline(title) or _translate_google_public(title)
+
+
 def news_headlines(region: str) -> dict:
     """Original headlines and links; translation needs a verified translator."""
     if region not in _FEEDS:
@@ -56,7 +88,7 @@ def news_headlines(region: str) -> dict:
             items.append({'title_original':title,'title_ko':title if region=='KR' else None,'translation_status':'original_ko' if region=='KR' else 'translator_not_configured','url':link,'published':(entry.findtext('pubDate') or '')[:60]})
         if region=='US' and items:
             with ThreadPoolExecutor(max_workers=4) as pool:
-                translations=list(pool.map(_translate_headline,[i['title_original'] for i in items]))
+                translations=list(pool.map(translate_headline_redundant,[i['title_original'] for i in items]))
             for item,translation in zip(items,translations):
                 if translation:
                     item['title_ko']=translation
