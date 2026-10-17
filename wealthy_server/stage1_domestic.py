@@ -18,7 +18,7 @@ CHOICES = (
 
 
 def paper_run_domestic(owner, portfolios, *, today=None, quote_provider=verified_quote,
-                       preference=None):
+                       preference=None, reserve_percent=25):
     day = today or datetime.now(ZoneInfo('Asia/Seoul')).date()
     results = []
     account_map = {row['id']: row for row in portfolios.list(owner)['accounts']}
@@ -57,8 +57,12 @@ def paper_run_domestic(owner, portfolios, *, today=None, quote_provider=verified
             cash = Decimal(str(account['krw_cash']))
             # No leverage. One share daily, only if within 20% of account
             # starting allocation and sufficient actual virtual cash.
+            if type(reserve_percent) is not int or not 0<=reserve_percent<=100:
+                raise ValueError('보유현금 유보율 검증 실패')
+            reserve_krw = cash * Decimal(reserve_percent) / Decimal(100)
+            spendable = max(Decimal('0'), cash-reserve_krw)
             limit = Decimal('80000')
-            if price <= min(cash, limit) and (holding + 1) * price <= Decimal('200000'):
+            if price <= min(spendable, limit) and (holding + 1) * price <= Decimal('200000'):
                 portfolios.trade(owner, account_id, symbol, 'BUY', 1, key, q)
                 results.append({'account':account_id,'status':'executed','side':'BUY',
                     'symbol':symbol,'quantity':1,'price':str(price),
