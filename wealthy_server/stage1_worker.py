@@ -20,6 +20,7 @@ from .stage1_diary import save_daily_paper_report
 from .stage1_strategy_policy import StrategyPolicy
 from .stage1_controls import status as trade_status
 from .stage1_decisions import reserve_ratio
+from .stage1_daily_cards import store_daily_cards_after_16
 
 log = logging.getLogger("wealthy.paper.worker")
 
@@ -44,6 +45,8 @@ class PaperWorker:
         owner = owners[0]
         today = datetime.now(ZoneInfo("Asia/Seoul")).date()
         initialize_paper_accounts(owner, self.ledger, self.portfolios, today=today)
+        store_daily_cards_after_16(owner,self.portfolios,self.ledger,
+                                   self.preferences,StrategyPolicy(self.portfolios))
         control = trade_status(owner, self.portfolios)
         if control["paused"]:
             self.last_result = {"status":"paused","reason":control["reason"],
