@@ -17,10 +17,16 @@ CHOICES = (
 )
 
 
-def paper_run_domestic(owner, portfolios, *, today=None, quote_provider=verified_quote):
+def paper_run_domestic(owner, portfolios, *, today=None, quote_provider=verified_quote,
+                       preference=None):
     day = today or datetime.now(ZoneInfo('Asia/Seoul')).date()
     results = []
     account_map = {row['id']: row for row in portfolios.list(owner)['accounts']}
+    if preference is not None and (preference.get('kr_weight', 0) == 0
+                                   or preference.get('etf_weight', 0) == 0):
+        return {'status':'skipped','results':[],
+                'reason':'한국시장 또는 ETF 투자 비율이 0%로 지정됨',
+                'live_broker_connected':False}
     for account_id, symbol, name, thesis in CHOICES:
         account = account_map.get(account_id)
         if not account:
