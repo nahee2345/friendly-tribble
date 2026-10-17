@@ -98,10 +98,15 @@ def list_approvals(owner,portfolios):
                           rationale,status,created_at,expires_at,decided_at
                           FROM stage1_approvals WHERE owner=?
                           ORDER BY created_at DESC LIMIT 100""",(owner,)).fetchall()
+        filled=set(db.execute("SELECT portfolio,request_id FROM virtual_orders WHERE owner=?",
+                              (owner,)).fetchall())
         db.execute("COMMIT")
     names=("request_id","account","symbol","side","quantity","amount_krw",
            "rationale","status","created_at","expires_at","decided_at")
-    return {"items":[dict(zip(names,row)) for row in rows],
+    items=[dict(zip(names,row)) for row in rows]
+    for item in items:
+        item["executed"]=(item["account"],item["request_id"]) in filled
+    return {"items":items,
             "disclaimer":"승인은 실제 주문이나 가상 체결을 실행하지 않습니다. 주문 실행 시 새 시세·잔액·위험 재검증 필요."}
 
 
