@@ -16,6 +16,7 @@ from .stage1_bootstrap import initialize_paper_accounts
 from .stage1_autorun import paper_run_once
 from .stage1_domestic import paper_run_domestic
 from .stage1_risk import paper_exit_review
+from .stage1_diary import save_daily_paper_report
 
 log = logging.getLogger("wealthy.paper.worker")
 
@@ -43,6 +44,7 @@ class PaperWorker:
         exit_result = paper_exit_review(owner, self.portfolios, today=today)
         result = paper_run_once(owner, self.ledger, self.portfolios, self.preferences, today=today)
         domestic_result = paper_run_domestic(owner, self.portfolios, today=today)
+        save_daily_paper_report(owner, self.portfolios, us=result, domestic=domestic_result, exits=exit_result)
         self.last_result = {'status': result.get('status', 'unknown'),
                             'domestic': domestic_result.get('results', []),
                             'exits': exit_result.get('events', []),
