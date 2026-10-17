@@ -58,9 +58,9 @@ def paper_run_us_stocks(owner,ledger,portfolios,preferences,*,today=None,
     except (ValueError,TypeError,KeyError,InvalidOperation):
         return {"status":"skipped","traded":False,"reason":"환율 형식 오류"}
     gross=Decimal(cash["krw_cash"])+Decimal(cash["usd_cash"])*rate
-    # Limit 5% of original total per stock purchase and retain a cash buffer.
+    # Limit 10% of original total per stock purchase and retain a cash buffer.
     initial=Decimal(ledger.state(owner,day)["initial_krw"])
-    invest_cap=min(initial*Decimal("0.05"),gross*(Decimal(100-reserve_ratio(weights))/100),
+    invest_cap=min(initial*Decimal("0.10"),gross*(Decimal(100-reserve_ratio(weights))/100),
                    gross*Decimal(prefs["stock_weight"])/100)
     for symbol,tags in ranked:
         q=quote_provider(symbol)
