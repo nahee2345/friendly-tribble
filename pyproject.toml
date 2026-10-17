@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "long-term-asset-assistant"
+version = "0.2.0"
+description = "Read-only market data and long-term asset management assistant"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "keyring>=25.6,<26",
+    "tzdata>=2025.2; platform_system == 'Windows'",
+]
+
+[project.optional-dependencies]
+web = [
+    "argon2-cffi>=23.1,<26",
+    "cryptography>=44,<51",
+    "fastapi>=0.115,<1",
+    "httpx>=0.27,<1",
+    "python-multipart>=0.0.18,<1",
+    "sqlalchemy>=2.0,<3",
+    "uvicorn[standard]>=0.34,<1",
+]
+legacy-cloud = [
+    "psycopg[binary]>=3.2,<4",
+]
+
+[project.scripts]
+asset-assistant = "asset_assistant.cli:main"
+asset-assistant-gui = "asset_assistant.gui:main"
+asset-assistant-release = "asset_assistant.release:main"
+asset-assistant-automation = "asset_assistant.automation:main"
+asset-assistant-scheduler = "asset_assistant.scheduler:main"
+wealthy-local = "wealthy_server.local_runtime:main"
+
+[tool.setuptools.packages.find]
+include = ["asset_assistant*", "wealthy_server*"]
+
+[tool.setuptools.package-data]
+wealthy_server = ["offline_sample.json"]

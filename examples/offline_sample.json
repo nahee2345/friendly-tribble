@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "mode": "OFFLINE",
+  "scenario_label": "장기 자산관리 OFFLINE 검산 보고서",
+  "realm": "SAMPLE",
+  "as_of": "2028-01-01T00:00:00+09:00",
+  "declared_initial_assets_krw": "4000000",
+  "allocation_year": 2028,
+  "accounts": [
+    {
+      "account_id": "sample-investment",
+      "alias": "가상 투자계좌",
+      "account_type": "SAMPLE_ONLY",
+      "purpose": "INVESTMENT",
+      "currency": "KRW"
+    }
+  ],
+  "positions": [
+    {
+      "position_id": "sample-core-equity",
+      "account_id": "sample-investment",
+      "name": "가상 코어 주식",
+      "asset_class": "CORE_EQUITY",
+      "market_value_krw": "2520000",
+      "as_of": "2028-01-01T00:00:00+09:00",
+      "value_status": "KNOWN",
+      "source": "project sample"
+    },
+    {
+      "position_id": "sample-core-bond",
+      "account_id": "sample-investment",
+      "name": "가상 코어 채권",
+      "asset_class": "CORE_BOND",
+      "market_value_krw": "900000",
+      "as_of": "2028-01-01T00:00:00+09:00",
+      "value_status": "KNOWN",
+      "source": "project sample"
+    },
+    {
+      "position_id": "sample-core-cash",
+      "account_id": "sample-investment",
+      "name": "가상 투자용 현금성",
+      "asset_class": "CORE_CASH",
+      "market_value_krw": "180000",
+      "as_of": "2028-01-01T00:00:00+09:00",
+      "value_status": "KNOWN",
+      "source": "project sample"
+    },
+    {
+      "position_id": "sample-satellite",
+      "account_id": "sample-investment",
+      "name": "가상 위성",
+      "asset_class": "SATELLITE",
+      "market_value_krw": "400000",
+      "as_of": "2028-01-01T00:00:00+09:00",
+      "value_status": "KNOWN",
+      "source": "project sample"
+    }
+  ],
+  "cashflow": {
+    "year": 2028,
+    "monthly_net_income_krw": "2585469",
+    "essential_expenses_krw": "850000"
+  },
+  "goal": {
+    "actual_year_end_assets_krw": "4000000",
+    "planned_next_year_investment_krw": "12000000"
+  },
+  "satellite": {
+    "expected_annual_new_investment_krw": "12000000",
+    "measured_loss_krw": null
+  },
+  "assumptions": [
+    "초기 400만 원 전액을 투자자산으로 둔 계산 검산용 시나리오이며 실제 잔고가 아닙니다.",
+    "월 소득은 2028년 6월 시작 검산 예시를 설명하기 위한 조건부 값이며 공무원 급여 추정이 아닙니다.",
+    "연간 신규 투자계획 1,200만 원은 위성 B_y 경계 검산용 가상 입력입니다."
+  ]
+}

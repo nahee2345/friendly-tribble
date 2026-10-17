@@ -1,0 +1,19 @@
+{
+  "name": "Wealthy 투자 분석",
+  "short_name": "Wealthy",
+  "description": "개인 투자 분석 및 정기 보고서 웹 앱",
+  "lang": "ko-KR",
+  "start_url": "/dashboard",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#2563eb",
+  "icons": [
+    {
+      "src": "/wealthy-mark.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
