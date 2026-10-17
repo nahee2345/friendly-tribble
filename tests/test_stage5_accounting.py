@@ -384,3 +384,52 @@ def test_owner_isolation_rejects_other_owner_and_never_moves_cash(tmp_path):
     assert other["market_valuation_krw"] is None or Decimal(other["market_valuation_krw"])==0
     assert engine.report("alice",now=NOW)["valuation_complete"]
     assert p.list("alice")["accounts"]==before
+
+
+def test_sale_year_overseas_gain_comparison_only_with_known_trade_fx(tmp_path):
+    ledger,p,cache,engine=environment(tmp_path)
+    p.auto_buy_usd_with_fx("alice","AAPL",quote("AAPL",100),"1400","verified-buy-fx-01")
+    p.trade("alice","default","AAPL","SELL",1,"verified-sell-fx-01",quote("AAPL",120))
+    with p._db() as db:
+        db.execute("UPDATE stage1_trade_metadata SET foreign_exchange_rate='1450' "
+                   "WHERE owner='alice' AND portfolio='default' AND order_key='verified-sell-fx-01'")
+    market(cache,fx="1500")
+    report=engine.report("alice",now=NOW)
+    scenario=report["tax_illustrations"]["overseas_general_realized"]
+    assert scenario["status"]=="illustrative_only"
+    assert scenario["historical_fx_covered"] is True
+    assert scenario["annual_krw_gain_proxy"]=="34000"
+    assert scenario["isa_eligible"] is False
+    assert scenario["isa_comparison"] is None
+    assert report["realized_sales"][0]["gross_sale_gain_krw"]=="34000"
+
+
+def test_fee_receipts_have_explicit_unposted_currency_and_native_totals(tmp_path):
+    ledger,p,cache,engine=environment(tmp_path)
+    p.trade("alice","kr-base","069500","BUY",1,"known-cost-01",quote("069500",10000))
+    with p._db() as db:
+        db.execute("""UPDATE stage1_trade_metadata
+            SET fee_amount='12.5', tax_amount='3.5', costs_currency='KRW'
+            WHERE owner='alice' AND order_key='known-cost-01'""")
+    market(cache,prices={"069500":"10000"})
+    data=engine.report("alice",now=NOW)
+    amount=data["fee_analysis"]["recorded_unposted_native"]["KRW"]
+    assert amount=={"fee":"12.5","tax":"3.5"}
+    assert data["fee_analysis"]["recorded_trade_cost_receipts"][0]["cash_posted"] is False
+    assert data["market_valuation_krw"]=="4000000"
+
+
+def test_corporate_event_even_marked_reconciled_stops_unadjusted_inventory(tmp_path):
+    ledger,p,cache,engine=environment(tmp_path)
+    p.trade("alice","kr-base","069500","BUY",1,"split-old-buy-01",quote("069500",10000))
+    market(cache,prices={"069500":"12000"})
+    with p._db() as db:
+        db.execute("""INSERT INTO stage1_corporate_events
+           (owner,event_key,symbol,category,effective_date,terms_json,
+            evidence_source,status,created_at_utc) VALUES(?,?,?,?,?,?,?,?,?)""",
+           ("alice","split-event-01","069500","SPLIT",START.date().isoformat(),
+            '{"ratio":"2:1"}',"fixture","RECONCILED",START.isoformat()))
+    data=engine.report("alice",now=NOW)
+    assert not data["valuation_complete"]
+    assert "권리변경" in data["missing"][0]
+    assert data["market_valuation_krw"] is None
