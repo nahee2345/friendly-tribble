@@ -133,6 +133,11 @@ def research_comparison(positions,*,allowance_type="standard"):
         return {"status":"incomplete","missing":sorted(set(unknown)),
                 "domestic_isa":None,"foreign_isa_eligible":False,
                 "warning":"해외지수 국내상장 ETF 평가손익 일부를 검증할 수 없어 비교 보류."}
+    if not sources:
+        return {"status":"no_eligible_exposure","domestic_isa":None,
+                "excluded":excluded,"foreign_isa_eligible":False,
+                "not_paid_or_posted":True,
+                "warning":"가정 비교가 가능한 국내상장 해외지수 ETF 보유손익이 없습니다."}
     scenario=domestic_isa_scenario(gain,allowance_type=allowance_type)
     scenario["included_symbols"]=sorted(set(sources))
     scenario["basis"]="보유종목을 현재 지연 종가로 모두 매도한다는 가정, 실현되지 않은 손익"
