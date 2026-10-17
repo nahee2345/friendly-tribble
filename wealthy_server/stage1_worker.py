@@ -18,6 +18,7 @@ from .stage1_domestic import paper_run_domestic
 from .stage1_risk import paper_exit_review
 from .stage1_diary import save_daily_paper_report
 from .stage1_strategy_policy import StrategyPolicy
+from .stage1_decisions import reserve_ratio
 
 log = logging.getLogger("wealthy.paper.worker")
 
@@ -48,7 +49,8 @@ class PaperWorker:
                                 self.preferences, today=today,
                                 strategy_weights=weights)
         domestic_result = paper_run_domestic(owner, self.portfolios, today=today,
-                                             preference=self.preferences.get(owner))
+                                             preference=self.preferences.get(owner),
+                                             reserve_percent=reserve_ratio(weights))
         save_daily_paper_report(owner, self.portfolios, us=result, domestic=domestic_result, exits=exit_result)
         self.last_result = {'status': result.get('status', 'unknown'),
                             'domestic': domestic_result.get('results', []),
