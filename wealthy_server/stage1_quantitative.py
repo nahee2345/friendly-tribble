@@ -248,10 +248,12 @@ def _annual_flow(facts,tag,now,unit="USD"):
 
 
 def _annual_revenue(facts,now):
-    for tag in ("RevenueFromContractWithCustomerExcludingAssessedTax","Revenues"):
-        rows=_annual_flow(facts,tag,now)
-        if rows:return rows
-    return []
+    # Never join two different SEC revenue tags into a fictitious YoY rate.
+    # Prefer a single tag with two comparable full-year observations.
+    candidates=[_annual_flow(facts,tag,now) for tag in
+                ("RevenueFromContractWithCustomerExcludingAssessedTax","Revenues")]
+    return next((rows for rows in candidates if len(rows)>=2),
+                next((rows for rows in candidates if rows),[]))
 
 
 def _find_at(rows,end):
@@ -273,10 +275,15 @@ def _value(stock,price,facts,price_ref,facts_ref,now):
         return _result(reason="비정상 PBR 산출(자료 대조 필요)")
     # Fixed research buckets; never pretend this is intrinsic fair value.
     score=_clamp(90-19*float(pb-Decimal("1")) if pb>1 else 90+7*float(1-pb))
+    risks=["자산 재평가·무형자산·부채 및 미래 이익을 단일 PBR로 대체할 수 없습니다."]
+    income=_find_at(_annual_flow(facts,"NetIncomeLoss",now),latest)
+    if income is not None and income<0:
+        score=max(0,score-25)
+        risks.append("동일 연간 SEC 순이익이 음수이므로 저PBR 가치함정 가능성으로 점수를 감점했습니다.")
     return _result(score=score,
         why=[f"SEC 동일 회계연도 자기자본/주식수 기반 PBR 약 {float(pb):.2f}배",
              "낮은 PBR은 관찰 신호일 뿐 적정 주가 또는 안전마진의 증거가 아닙니다."],
-        risks=["자산 재평가·무형자산·부채 및 미래 이익을 단일 PBR로 대체할 수 없습니다."],
+        risks=risks,
         metrics={"pb_ratio_estimate":round(float(pb),3),
                  "fiscal_end":latest.isoformat(),"valuation_method":"가격×유통발행주식수/기말 자기자본"},
         refs=[price_ref,facts_ref])
