@@ -18,6 +18,7 @@ from .stage1_domestic import paper_run_domestic
 from .stage1_risk import paper_exit_review
 from .stage1_diary import save_daily_paper_report
 from .stage1_strategy_policy import StrategyPolicy
+from .stage1_controls import status as trade_status
 from .stage1_decisions import reserve_ratio
 
 log = logging.getLogger("wealthy.paper.worker")
@@ -43,6 +44,12 @@ class PaperWorker:
         owner = owners[0]
         today = datetime.now(ZoneInfo("Asia/Seoul")).date()
         initialize_paper_accounts(owner, self.ledger, self.portfolios, today=today)
+        control = trade_status(owner, self.portfolios)
+        if control["paused"]:
+            self.last_result = {"status":"paused","reason":control["reason"],
+                                "domestic":[],"exits":[]}
+            self.last_checked_at = datetime.now(ZoneInfo("Asia/Seoul")).isoformat()
+            return
         exit_result = paper_exit_review(owner, self.portfolios, today=today)
         weights = StrategyPolicy(self.portfolios).get(owner)["weights"]
         result = paper_run_once(owner, self.ledger, self.portfolios,
