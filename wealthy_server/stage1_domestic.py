@@ -52,14 +52,14 @@ def paper_run_domestic(owner, portfolios, *, today=None, quote_provider=verified
             # No leverage. One share daily, only if within 20% of account
             # starting allocation and sufficient actual virtual cash.
             limit = Decimal('80000')
-            if holding == 0 and price <= min(cash, limit):
+            if price <= min(cash, limit) and (holding + 1) * price <= Decimal('200000'):
                 portfolios.trade(owner, account_id, symbol, 'BUY', 1, key, q)
                 results.append({'account':account_id,'status':'executed','side':'BUY',
                     'symbol':symbol,'quantity':1,'price':str(price),
                     'as_of':q['as_of'],'thesis':thesis,'source':q['source']})
             else:
                 results.append({'account':account_id,'status':'skipped',
-                   'symbol':symbol,'reason':'매수 한도 또는 기존 보유수량 제한'})
+                   'symbol':symbol,'reason':'현금 부족 또는 계좌별 보유평가액 20만원 한도'})
         except (ValueError, InvalidOperation, KeyError, ArithmeticError):
             results.append({'account':account_id,'status':'skipped',
                             'symbol':symbol,'reason':'주문 검증 실패'})
