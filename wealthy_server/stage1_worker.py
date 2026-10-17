@@ -30,10 +30,12 @@ log = logging.getLogger("wealthy.paper.worker")
 
 
 class PaperWorker:
-    def __init__(self, database, ledger, portfolios, preferences, interval=3600):
+    def __init__(self, database, ledger, portfolios, preferences, interval=3600,
+                 market_collector=None):
         self.database, self.ledger = database, ledger
         self.portfolios, self.preferences = portfolios, preferences
         self.interval = max(3600, interval)
+        self.market_collector = market_collector
         self.stop_signal = Event()
         self.thread = None
         self.last_result = {'status': 'waiting', 'reason': '첫 검토 대기'}
@@ -61,6 +63,15 @@ class PaperWorker:
             review_news(owner,self.portfolios,notify=True)
         except Exception:
             log.warning("30-day holding news review unavailable",exc_info=True)
+        # Market data are cached separately from paper cash/orders. A cache
+        # failure never authorizes or substitutes a simulated execution quote.
+        if self.market_collector is not None:
+            try:
+                data_result=self.market_collector.tick(owner,self.portfolios,max_requests=6)
+                log.info("Stage2 public reference refresh: %s attempts",
+                         len(data_result["attempts"]))
+            except Exception:
+                log.warning("Stage2 market-cache refresh deferred",exc_info=True)
         control = trade_status(owner, self.portfolios)
         if control["paused"]:
             self.last_result = {"status":"paused","reason":control["reason"],
