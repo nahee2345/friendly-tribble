@@ -472,7 +472,7 @@ class PortfolioEngine:
                     if choice["side"]=="BUY":
                         krw_cash,usd_cash,_,_=self.portfolios._money(db,owner,choice["account"])
                         available=krw_cash+(usd_cash*rate if expected=="USD" else Decimal(0))
-                        ratio=Decimal(reserve_ratio(self.policy.get(owner)["weights"]))/100
+                        ratio=_decimal(plan["reserve_percent"])/100
                         if actual>max(Decimal(0),available*(1-ratio)):
                             db.execute("COMMIT")
                             claims.append({"request_id":key,"symbol":choice["symbol"],
