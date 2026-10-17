@@ -46,6 +46,13 @@ def _valid_price(quote, code, currency):
         return None
 
 
+def reserve_ratio(weights):
+    """Deterministic conservative cash-buffer heuristic, not a forecast."""
+    if not isinstance(weights, dict) or not {'momentum','index'} <= set(weights):
+        raise ValueError("invalid strategy policy")
+    return min(40, max(15, 25 + weights["momentum"] // 10 - weights["index"] // 10))
+
+
 def proposal(owner, portfolios, preference_store, strategy_store, *,
              quote_provider=verified_quote, fx_provider=current_fx):
     preference = preference_store.get(owner)
@@ -60,7 +67,7 @@ def proposal(owner, portfolios, preference_store, strategy_store, *,
         rate = None
     # Cash reserve is a conservative, deterministic *suggestion* from policy,
     # not an economic forecast or assured optimal allocation.
-    reserve_pct = min(40, max(15, 25 + weights["momentum"] // 10 - weights["index"] // 10))
+    reserve_pct = reserve_ratio(weights)
     target_krw = sum(Decimal(a["krw_cash"]) for a in accounts.values())
     if rate is not None:
         target_krw += sum(Decimal(a["usd_cash"]) * rate for a in accounts.values())
