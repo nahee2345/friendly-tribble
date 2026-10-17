@@ -179,9 +179,12 @@ def test_stop_loss_review_and_sell_stops_same_sleeve_reentry(tmp_path):
     assert any(x["kind"]=="EXIT_REVIEW" for x in plan["review"])
     exits=[x for x in plan["proposed_orders"] if x["side"]=="SELL"]
     assert exits and exits[0]["account"]=="kr-base"
+    engine.quote_provider=lambda symbol:quote(symbol,8800 if symbol=="069500" else 20000)
     set_paused("owner",p,False,"test")
     result=engine.run("owner",now=NOW)
     assert any(x["side"]=="SELL" for x in result["executed"])
+    assert not any(x["side"]=="BUY" and x["market"]=="KR" and x["kind"]=="ETF"
+                   for x in result["executed"])
     assert not p.list("owner")["accounts"][1]["holdings"]
 
 
