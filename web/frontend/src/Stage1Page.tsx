@@ -28,9 +28,11 @@ export function Stage1Page(){
   const [loadingCandidates,setLoadingCandidates]=useState(false);
   async function discover(){setLoadingCandidates(true);try{const result=await get<{items:Candidate[]}>('/api/v1/stage1/candidates');setCandidates(result.items);}catch(e){setError(String(e));}finally{setLoadingCandidates(false);}}
   async function savePreferences(){await action(()=>post('/api/v1/stage1/preferences',{us_weight:preferences.us_weight,etf_weight:preferences.etf_weight}),'투자 선호 비중이 저장되었습니다.');void discover();}
+  const [auto,setAuto]=useState<{enabled:boolean;last_checked_at:string|null;last_result:{status:string;reason?:string;symbol?:string}}|null>(null);
   const [busy,setBusy]=useState(false);const [error,setError]=useState('');const [notice,setNotice]=useState('');
   async function refresh(){try{const f=await get<State>('/api/v1/stage1/account');const p=await get<{accounts:A[]}>('/api/v1/stage1/portfolios');setFund(f);setAccounts(p.accounts);setError('');}catch(e){setError(String(e));}}
   useEffect(()=>{void refresh();get<typeof preferences>('/api/v1/stage1/preferences').then(setPreferences).catch(()=>{});void discover();get<{status:string;usd_krw?:string;as_of?:string}>('/api/v1/stage1/fx').then(setFx).catch(()=>{});(['US','KR'] as const).forEach(region=>get<{items:Article[]}>('/api/v1/stage1/news/'+region).then(x=>setNews(prev=>({...prev,[region]:x.items||[]}))).catch(()=>{}));},[]);
+  useEffect(()=>{let active=true;const fetchStatus=()=>{get<{enabled:boolean;last_checked_at:string|null;last_result:{status:string;reason?:string;symbol?:string}}>('/api/v1/stage1/auto-status').then(x=>{if(active)setAuto(x);}).catch(()=>{});};fetchStatus();const handle=setInterval(fetchStatus,60_000);return()=>{active=false;clearInterval(handle);};},[]);
   useEffect(()=>{get<{orders:typeof orders}>(`/api/v1/stage1/portfolios/${encodeURIComponent(selected)}/orders`).then(x=>setOrders(x.orders)).catch(()=>setOrders([]));},[selected,accounts.length]);
   const current=accounts.find(x=>x.id===selected)||accounts[0];
   async function action(fn:()=>Promise<unknown>,done:string){setBusy(true);setError('');setNotice('');try{await fn();await refresh();setNotice(done);if(current){const x=await get<{orders:typeof orders}>(`/api/v1/stage1/portfolios/${encodeURIComponent(selected)}/orders`);setOrders(x.orders);}}catch(e){setError(String(e));}finally{setBusy(false);}}
@@ -38,6 +40,10 @@ export function Stage1Page(){
   return <div className="s1-shell">
     <div className="s1-heading"><div><div className="s1-eyebrow">WEALTHY / PAPER INVESTING</div><p className="s1-desc">기본 계좌: 미국 주식 · 한국 주식 · ISA 각 1개. 시작금 400만 원(미국 80% / 국내 10% / ISA 10%), 매월 25일 35만 원을 동일 비율로 자동 가상 입금합니다.</p><h1>가상 투자 워크스페이스</h1><p>실제 금융계좌와 분리된 모의투자 · 서버 실행 중 1시간마다 검토 · 지연 종가 기준</p></div><span className="s1-pill">{fund?.auto_trading_enabled?'● 자동 모의투자 실행 중':'● 모의거래 전용 / 자동 운용 대기'}</span></div>
     {error&&<div className="s1-error" role="alert">{error}</div>}{notice&&<div className="s1-notice" role="status">{notice}</div>}
+    <section className="s1-panel"><div className="s1-panelhead"><h2>자동 가상투자 운용</h2><span>{auto?.enabled?'서버 실행 중':'검토 대기'}</span></div>
+      <p className="s1-desc">서버 시작 시 1회, 이후 약 1시간마다 시세·환율을 확인합니다. 미국 ETF에 한해 하루 최대 1주, 최초 투자금의 5% 이내에서 가상 거래합니다. 시세가 없으면 거래하지 않습니다.</p>
+      <p className="s1-desc">최근 검사: {auto?.last_checked_at??'대기 중'} · 결과: {auto?.last_result.status??'대기'} {auto?.last_result.symbol??''} {auto?.last_result.reason??''}</p>
+      <p className="s1-desc">주식 시세: Stooq 지연 일간 종가 · 환율: Frankfurter 참고환율 · 국내주식/ISA 자동 체결: 미지원</p></section>
     <div className="s1-stats">
       <div className="s1-tile"><small>전체 가상 원화 현금</small><strong>₩ {money(displayValue)}</strong><span>계좌 {accounts.length}개 합계</span></div>
       <div className="s1-tile"><small>가상 달러 현금</small><strong>$ {money(accounts.reduce((v,a)=>v+Number(a.usd_cash),0))}</strong><span>미국 주식 모의매수에 사용</span></div>
