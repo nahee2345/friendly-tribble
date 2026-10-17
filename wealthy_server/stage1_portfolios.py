@@ -60,7 +60,7 @@ class Portfolios:
         with self._db() as db:
             db.execute('BEGIN IMMEDIATE')
             self._ensure(db,owner)
-            accounts=db.execute('SELECT id,name,kind FROM portfolios WHERE owner=? ORDER BY CASE id WHEN 'default' THEN 0 WHEN 'kr-base' THEN 1 WHEN 'isa-base' THEN 2 ELSE 3 END,created_at,id',(owner,)).fetchall()
+            accounts=db.execute("""SELECT id,name,kind FROM portfolios WHERE owner=? ORDER BY CASE id WHEN 'default' THEN 0 WHEN 'kr-base' THEN 1 WHEN 'isa-base' THEN 2 ELSE 3 END,created_at,id""",(owner,)).fetchall()
             result=[]
             for ident,name,kind in accounts:
                 krw,usd,holdings,count=self._money(db,owner,ident)
