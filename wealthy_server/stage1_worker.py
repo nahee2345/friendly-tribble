@@ -67,7 +67,8 @@ class PaperWorker:
                                              reserve_percent=reserve_ratio(weights))
         kr_stocks_result=paper_run_kr_stocks(owner,self.portfolios,self.preferences,
                                               today=today,reserve_percent=reserve_ratio(weights))
-        save_daily_paper_report(owner, self.portfolios, us=result, domestic=domestic_result, exits=exit_result)
+        save_daily_paper_report(owner, self.portfolios, us=result, domestic=domestic_result, exits=exit_result,
+                                us_stocks=stocks_result, kr_stocks=kr_stocks_result)
         self.last_result = {'status': result.get('status', 'unknown'),
                             'domestic': domestic_result.get('results', []),
                             'us_stocks': stocks_result,
