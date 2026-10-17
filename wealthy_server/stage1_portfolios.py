@@ -42,6 +42,17 @@ class Portfolios:
         return db
 
     @staticmethod
+    def _receipt(db, owner, portfolio, order_key, quote, rate=None):
+        """Capture only verified trade provenance; unknown costs remain NULL."""
+        db.execute("""INSERT OR IGNORE INTO stage1_trade_metadata
+           (owner,portfolio,order_key,quote_as_of,foreign_exchange_rate,
+            fee_amount,tax_amount,costs_currency,source,observed_at_utc,created_at_utc)
+           VALUES (?,?,?,?,?,NULL,NULL,NULL,?,?,?)""",
+           (owner, portfolio, order_key, quote.get('as_of'), rate,
+            quote['source'],datetime.now(timezone.utc).isoformat(),
+            datetime.now(timezone.utc).isoformat()))
+
+    @staticmethod
     def _assert_not_paused(db,owner):
         table=db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='stage1_trade_control'").fetchone()
         if table:
@@ -150,6 +161,7 @@ class Portfolios:
             db.execute('INSERT INTO virtual_orders VALUES (?,?,?,?,?,?,?,?,?,?,?)',
                 (owner,'default',request_id,symbol,'BUY',1,format(price,'f'),'USD',
                 quote['source'],quote['as_of'],datetime.now(timezone.utc).isoformat()))
+            self._receipt(db,owner,'default',request_id,quote,format(fx,'f'))
             db.execute('COMMIT')
         return {'status': 'executed', 'accounts': self.list(owner)['accounts']}
 
@@ -186,6 +198,7 @@ class Portfolios:
                 if side=='BUY' and (usd if currency=='USD' else krw)<price*quantity: raise ValueError('현금 부족')
                 if side=='SELL' and holdings.get(symbol,0)<quantity: raise ValueError('보유수량 부족')
                 db.execute('INSERT INTO virtual_orders VALUES(?,?,?,?,?,?,?,?,?,?,?)',(owner,portfolio,request_id,symbol,side,quantity,format(price,'f'),currency,quote['source'],quote['as_of'],datetime.now(timezone.utc).isoformat()))
+                self._receipt(db,owner,portfolio,request_id,quote)
             db.execute('COMMIT')
         return self.list(owner)
 
