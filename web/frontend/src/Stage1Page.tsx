@@ -43,7 +43,7 @@ export function Stage1Page(){
   async function refreshCardHistory(){try{const data=await get<{items:ArchivedReport[]}>('/api/v1/stage1/seven-cards/history');setArchivedCards(data.items);}catch(e){setError(String(e));}}
 
   async function refreshCards(){try{const result=await get<{cards:ReportCard[]}>('/api/v1/stage1/seven-cards');setReportCards(result.cards);}catch(e){setError(String(e));}}
-  const [dailyReports,setDailyReports]=useState<{date:string;checked_at:string;us:{status:string;symbol?:string;reason?:string};domestic:{account:string;status:string;symbol?:string;reason?:string}[];exits:{account:string;symbol:string;status:string}[]}[]>([]);
+  const [dailyReports,setDailyReports]=useState<{date:string;checked_at:string;us:{status:string;symbol?:string;reason?:string};us_stocks?:{status:string;symbol?:string;reason?:string};kr_stocks?:{status:string;symbol?:string;reason?:string};domestic:{account:string;status:string;symbol?:string;reason?:string}[];exits:{account:string;symbol:string;status:string}[]}[]>([]);
   type Candidate={symbol:string;name:string;kind:string;market:string;thesis:string;risks:string;issuer_url:string;quote:Quote;rating:string;account:string; evidence:string[]};
   const [candidates,setCandidates]=useState<Candidate[]>([]);
   type Research={status:string;reason?:string;symbol?:string;as_of?:string;observations?:number;momentum_60_sessions_pct?:number;annualized_volatility_pct?:number;max_drawdown_pct?:number;trend?:string;backtest?:{return_pct:number;buy_hold_return_pct:number;turnovers:number;fee_bps_per_trade:number;assumptions:string};strategies?:Record<string,{available:boolean;reason?:string;signal?:string}>};
@@ -168,7 +168,7 @@ export function Stage1Page(){
         <label>ETF {preferences.etf_weight}% / 개별주 {100-preferences.etf_weight}%<input type="range" min="0" max="100" step="5" value={preferences.etf_weight} onChange={e=>setPreferences(p=>({...p,etf_weight:Number(e.target.value),stock_weight:100-Number(e.target.value)}))}/></label></div>
         <button className="s1-primary" disabled={busy} onClick={()=>void savePreferences()}>비중 저장</button><p className="s1-desc">선호 비중은 투자 제안 우선순위·향후 자금 배분·자동 ETF 모의매수의 최소 참여 조건에 반영됩니다. 검증되지 않은 데이터를 이용한 자동거래는 실행하지 않습니다.</p>
       </section>
-      <section className="s1-panel"><h2>가상 ETF 1회 자동 실행</h2><p className="s1-desc">미국·ETF 선호 비중이 각각 50% 이상이면 검증된 지연 종가로 미국 ETF 최대 1주를 가상 매수합니다. 최초 투자금의 5%를 넘지 않으며 필요한 경우 참고환율로 가상 환전을 기록합니다. 하루 중복 주문은 차단됩니다. 24시간 무인 자동매매나 AI 수익 예측은 아닙니다.</p><button className="s1-primary" disabled={busy} onClick={()=>void action(async()=>{const r=await post<{status:string;symbol?:string;reason?:string}>('/api/v1/stage1/auto-run',{});if(r.status!=='executed')throw Error(r.reason??'해당 조건에서 주문이 실행되지 않았습니다.');},'ETF 가상 주문 1건이 기록되었습니다.')}>{busy?'검증 중…':'ETF 가상 모의투자 1회 실행'}</button></section>
+      <section className="s1-panel"><h2>가상 ETF 1회 자동 실행</h2><p className="s1-desc">미국과 ETF 비중이 모두 0%가 아니면 검증된 지연 종가로 미국 ETF 최대 1주를 가상 매수합니다. 최초 투자금의 5%를 넘지 않으며 필요한 경우 참고환율로 가상 환전을 기록합니다. 하루 중복 주문은 차단됩니다. 24시간 무인 자동매매나 AI 수익 예측은 아닙니다.</p><button className="s1-primary" disabled={busy} onClick={()=>void action(async()=>{const r=await post<{status:string;symbol?:string;reason?:string}>('/api/v1/stage1/auto-run',{});if(r.status!=='executed')throw Error(r.reason??'해당 조건에서 주문이 실행되지 않았습니다.');},'ETF 가상 주문 1건이 기록되었습니다.')}>{busy?'검증 중…':'ETF 가상 모의투자 1회 실행'}</button></section>
       <section className="s1-panel"><h2>국내 ETF 조사 후보 · 한국/ISA 모의거래</h2>
         <p className="s1-desc">국내 ETF는 6자리 종목코드의 공개 지연 종가가 검증될 때만 가상매수가 가능합니다. 출처: 비공식 Yahoo Finance 일간 차트. 투자수익 보장 또는 실시간 주문이 아닙니다.</p>
         <div className="s1-candidates">
@@ -197,7 +197,7 @@ export function Stage1Page(){
         <div className="s1-candidate-actions"><a href={c.issuer_url} target="_blank" rel="noopener noreferrer">운용사·기업 공식 자료 보기 ↗</a><button className="s1-outline" disabled={researchLoading} onClick={()=>void loadResearch(c.symbol)}>가격 분석·백테스트</button><button disabled={!c.quote.tradeable} className="s1-primary" onClick={()=>{setSymbol(c.symbol);setSide('BUY');setQty(1);setQuote(c.quote);setSection('trade');}}>이 종목 가상 매수하기</button></div>
       </article>)}</div>
       {!loadingCandidates&&!candidates.length&&<p className="s1-empty">조사 후보를 불러오지 못했습니다. 네트워크 상태를 확인해 주세요.</p>}
-      <p className="s1-desc">국내 주식은 검증된 가격 공급원과 계좌·세제 검사가 연결되기 전까지 주문할 수 없습니다. 미국 주식도 주문 순간 서버에서 가격을 재확인합니다.</p>
+      <p className="s1-desc">국내 주식은 비공식 공개 지연 종가를 검증한 경우에만 모의 거래가 가능합니다. 미국 주식도 주문 순간 서버에서 가격을 재확인합니다.</p>
       </section>
     </div>}
     {section==='overview'&&<section className="s1-panel"><div className="s1-panelhead"><h2>모의계좌 온라인 백업</h2><button className="s1-primary" disabled={busy} onClick={()=>void createPaperBackup()}>지금 백업</button></div>
@@ -228,7 +228,7 @@ export function Stage1Page(){
     </section>}
     {section==='reports'&&<section className="s1-panel"><div className="s1-panelhead"><h2>일별 자동 모의투자 보고서</h2><button className="s1-outline" onClick={()=>void get<{items:typeof dailyReports}>('/api/v1/stage1/daily-reports').then(x=>setDailyReports(x.items)).catch(()=>setError('보고서를 조회하지 못했습니다.'))}>새로고침</button></div>
         <p className="s1-desc">최근 30일, 한국 시간 기준. 서버 실행 중 생성된 가상 주문·검토 결과입니다. 뉴스 기반 투자 예측 결과가 아닙니다.</p>
-        {dailyReports.length?dailyReports.map(item=><article className="s1-candidate" key={item.date}><h3>{item.date}</h3><small>{item.checked_at}</small><p>미국 ETF: {item.us.status} {item.us.symbol??''} {item.us.reason??''}</p>{item.domestic.map((d,i)=><p key={i}>{d.account==='kr-base'?'국내계좌':'ISA'}: {d.status} {d.symbol??''} {d.reason??''}</p>)}{item.exits.map((d,i)=><p key={'exit'+i}>가상 매도 검토: {d.symbol} {d.status}</p>)}</article>):<p className="s1-empty">기록된 자동 보고서가 없습니다. 웹 서버의 자동운용 실행 상태를 확인해 주세요.</p>}
+        {dailyReports.length?dailyReports.map(item=><article className="s1-candidate" key={item.date}><h3>{item.date}</h3><small>{item.checked_at}</small><p>미국 ETF: {item.us.status} {item.us.symbol??''} {item.us.reason??''}</p><p>미국 개별주: {item.us_stocks?.status??'미검토'} {item.us_stocks?.symbol??''} {item.us_stocks?.reason??''}</p><p>한국 개별주: {item.kr_stocks?.status??'미검토'} {item.kr_stocks?.symbol??''} {item.kr_stocks?.reason??''}</p>{item.domestic.map((d,i)=><p key={i}>{d.account==='kr-base'?'국내계좌':'ISA'}: {d.status} {d.symbol??''} {d.reason??''}</p>)}{item.exits.map((d,i)=><p key={'exit'+i}>가상 매도 검토: {d.symbol} {d.status}</p>)}</article>):<p className="s1-empty">기록된 자동 보고서가 없습니다. 웹 서버의 자동운용 실행 상태를 확인해 주세요.</p>}
       </section>}
     {section==='news'&&<section className="s1-panel"><div className="s1-panelhead"><h2>보유 포트폴리오에 대한 뉴스 영향 · 결과 먼저</h2><button className="s1-outline" onClick={()=>void refreshImpacts()}>영향 다시 확인</button></div>
         <p>결과: {impactReport?.summary.portfolio_action??'정보 수집 대기'} · 관련 기사 {impactReport?.summary.headline_matches??0}건</p>
