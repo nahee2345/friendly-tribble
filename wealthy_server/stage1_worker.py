@@ -25,12 +25,14 @@ log = logging.getLogger("wealthy.paper.worker")
 
 class PaperWorker:
     def __init__(self, database, ledger, portfolios, preferences, interval=3600,
-                 market_collector=None, portfolio_engine=None):
+                 market_collector=None, portfolio_engine=None,
+                 accounting_engine=None):
         self.database, self.ledger = database, ledger
         self.portfolios, self.preferences = portfolios, preferences
         self.interval = max(3600, interval)
         self.market_collector = market_collector
         self.portfolio_engine = portfolio_engine
+        self.accounting_engine = accounting_engine
         self.stop_signal = Event()
         self.thread = None
         self.last_result = {'status': 'waiting', 'reason': '첫 검토 대기'}
@@ -67,6 +69,15 @@ class PaperWorker:
                          len(data_result["attempts"]))
             except Exception:
                 log.warning("Stage2 market-cache refresh deferred",exc_info=True)
+        # A daily NAV is sampled only after 16:00 KST and only if all held
+        # instruments pass Stage2 source verification. A cash-only book is
+        # valid without FX when no USD cash or securities are held.
+        if self.accounting_engine is not None:
+            try:
+                saved=self.accounting_engine.capture_daily_nav(owner)
+                log.info("Stage5 gross NAV snapshot: %s",saved.get("status"))
+            except Exception:
+                log.warning("Stage5 daily NAV sampling deferred",exc_info=True)
         control = trade_status(owner, self.portfolios)
         if control["paused"]:
             self.last_result = {"status":"paused","reason":control["reason"],
