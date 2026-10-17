@@ -47,7 +47,8 @@ class PaperWorker:
         result = paper_run_once(owner, self.ledger, self.portfolios,
                                 self.preferences, today=today,
                                 strategy_weights=weights)
-        domestic_result = paper_run_domestic(owner, self.portfolios, today=today)
+        domestic_result = paper_run_domestic(owner, self.portfolios, today=today,
+                                             preference=self.preferences.get(owner))
         save_daily_paper_report(owner, self.portfolios, us=result, domestic=domestic_result, exits=exit_result)
         self.last_result = {'status': result.get('status', 'unknown'),
                             'domestic': domestic_result.get('results', []),
