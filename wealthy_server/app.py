@@ -477,6 +477,17 @@ def create_app(
             except (ValueError, KeyError, ArithmeticError):
                 raise _error(400, "PAPER_AUTO_REJECTED", "가상 자동주문 검증에 실패했습니다.") from None
 
+        @app.get("/api/v1/stage1/auto-status")
+        def stage1_auto_status(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
+            worker = getattr(app.state, "paper_worker", None)
+            return {
+                "enabled": bool(worker and worker.thread and worker.thread.is_alive()),
+                "interval_minutes": 60,
+                "last_result": worker.last_result if worker else {"status": "disabled"},
+                "last_checked_at": worker.last_checked_at if worker else None,
+                "live_broker_connected": False,
+            }
+
         @app.get("/api/v1/stage1/account")
         def stage1_account(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
             state = stage1.state(actor.owner_id)
