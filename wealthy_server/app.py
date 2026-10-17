@@ -374,10 +374,15 @@ def create_app(
 
         from .stage1_discovery import PreferenceStore, shortlist
         preference_store = PreferenceStore(Path(db.engine.url.database).parent / "stage1-paper.sqlite3")
+        from .stage1_market_store import MarketStore
+        from .stage1_collectors import Collector
+        stage2_store = MarketStore.for_portfolios(portfolio_store)
+        stage2_collector = Collector(stage2_store)
         from .stage1_bootstrap import initialize_paper_accounts
         if market_information_auto_start:
             from .stage1_worker import PaperWorker
-            paper_worker = PaperWorker(db, stage1, portfolio_store, preference_store)
+            paper_worker = PaperWorker(db, stage1, portfolio_store, preference_store,
+                                       market_collector=stage2_collector)
             app.state.paper_worker = paper_worker
             app.router.add_event_handler("startup", paper_worker.start)
             app.router.add_event_handler("shutdown", paper_worker.stop)
@@ -517,6 +522,54 @@ def create_app(
                 return decide_approval(actor.owner_id, portfolio_store, body.request_id, body.approve)
             except ValueError:
                 raise _error(400,"APPROVAL_NOT_PENDING","승인 대기 중인 유효한 요청만 처리할 수 있습니다.") from None
+
+        class Stage2ReferenceRefresh(BaseModel):
+            kind: str
+            symbol: str
+
+        @app.get("/api/v1/stage1/reference/health")
+        def stage2_reference_health(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
+            import os
+            health=stage2_store.health(limit=40)
+            health["sec_contact_configured"]=bool(os.environ.get("WEALTHY_SEC_CONTACT"))
+            health["recorded_quotes_are_tradeable"]=False
+            return health
+
+        @app.get("/api/v1/stage1/reference/latest")
+        def stage2_reference_latest(kind: str, symbol: str,
+                                    actor: Actor = Depends(current_actor)) -> dict[str, Any]:
+            try:
+                return stage2_store.latest(kind.upper(), symbol.upper())
+            except ValueError:
+                raise _error(400,"REFERENCE_QUERY_INVALID",
+                             "요청 데이터 유형 또는 종목코드가 유효하지 않습니다.") from None
+
+        @app.post("/api/v1/stage1/reference/refresh")
+        def stage2_reference_refresh(body: Stage2ReferenceRefresh,
+                                     actor: Actor = Depends(mutation_actor)) -> dict[str, Any]:
+            from .stage1_market_store import CATEGORIES, ALLOWED_SYMBOL
+            from .stage1_catalog import ensure_seed, search
+            kind=body.kind.upper()
+            symbol=body.symbol.upper()
+            if kind not in CATEGORIES or not ALLOWED_SYMBOL.fullmatch(symbol):
+                raise _error(400,"REFERENCE_INPUT_INVALID","자료 종류나 종목 형식이 잘못되었습니다.")
+            if kind=="FX":
+                if symbol!="USD/KRW":
+                    raise _error(400,"REFERENCE_PAIR_UNSUPPORTED","현재 USD/KRW만 지원합니다.")
+            elif kind=="NEWS":
+                if symbol not in ("US","KR"):
+                    raise _error(400,"REFERENCE_NEWS_UNSUPPORTED","한국·미국 뉴스만 지원합니다.")
+            else:
+                if symbol in ("USD/KRW","US","KR"):
+                    raise _error(400,"REFERENCE_SYMBOL_UNSUPPORTED","종목코드를 지정해 주세요.")
+                ensure_seed(portfolio_store)
+                existing=search(portfolio_store,query=symbol,limit=15)["items"]
+                if not any(x["symbol"]==symbol for x in existing):
+                    raise _error(404,"REFERENCE_SYMBOL_NOT_LISTED",
+                                 "먼저 공개 종목목록에 등록된 종목을 선택해 주세요.")
+            # Refresh is bounded by the collection cooldown; GET requests
+            # never make uncapped provider calls and do not mutate trading cash.
+            return stage2_collector.collect(kind,symbol,force=False)
 
         @app.get("/api/v1/stage1/hub")
         def stage1_hub(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
