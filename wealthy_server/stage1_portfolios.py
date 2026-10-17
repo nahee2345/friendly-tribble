@@ -31,6 +31,14 @@ class Portfolios:
         db.execute('''CREATE TABLE IF NOT EXISTS portfolios (owner TEXT NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('GENERAL_OVERSEAS','GENERAL_DOMESTIC','ISA_SIMULATED')), created_at TEXT NOT NULL, PRIMARY KEY(owner,id))''')
         db.execute('''CREATE TABLE IF NOT EXISTS portfolio_transfers (owner TEXT NOT NULL, request_id TEXT NOT NULL, source TEXT NOT NULL, destination TEXT NOT NULL, amount_krw INTEGER NOT NULL CHECK(amount_krw>0), created_at TEXT NOT NULL, PRIMARY KEY(owner,request_id))''')
         db.execute('''CREATE TABLE IF NOT EXISTS virtual_orders (owner TEXT NOT NULL, portfolio TEXT NOT NULL, request_id TEXT NOT NULL, symbol TEXT NOT NULL, side TEXT NOT NULL CHECK(side IN ('BUY','SELL')), quantity INTEGER NOT NULL CHECK(quantity>0), price TEXT NOT NULL, currency TEXT NOT NULL, source TEXT NOT NULL, as_of TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(owner,portfolio,request_id))''')
+        # Existing ledgers are snapshotted before adding the v1 extension tables.
+        # All previously recorded deposits, transfers and fills are untouched.
+        try:
+            from .stage1_schema import ensure_schema
+            ensure_schema(db, self.path)
+        except Exception:
+            db.close()
+            raise
         return db
 
     @staticmethod
