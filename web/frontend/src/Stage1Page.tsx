@@ -59,6 +59,12 @@ export function Stage1Page(){
   const [busy,setBusy]=useState(false);const [error,setError]=useState('');const [notice,setNotice]=useState('');
   type Approval={request_id:string;account:string;symbol:string;side:string;quantity:number;amount_krw:number;rationale:string;status:string;expires_at:string};
   const [paperControl,setPaperControl]=useState<{paused:boolean;reason:string}|null>(null);
+  type InboxMessage={event_id:string;title:string;detail:string;created_at:string;read_at:string|null};
+  const [inboxItems,setInboxItems]=useState<InboxMessage[]>([]);
+  const [unreadCount,setUnreadCount]=useState(0);
+  async function reloadInbox(){try{const data=await get<{items:InboxMessage[];unread:number}>('/api/v1/stage1/inbox');setInboxItems(data.items);setUnreadCount(data.unread);}catch(e){setError(String(e));}}
+  async function markInboxRead(id:string){await action(async()=>{const data=await post<{items:InboxMessage[];unread:number}>('/api/v1/stage1/inbox/read',{event_id:id});setInboxItems(data.items);setUnreadCount(data.unread);},'알림을 읽음 처리했습니다.');}
+
   type PaperBackup={filename:string;bytes:number;modified_utc:string};
   const [paperBackups,setPaperBackups]=useState<PaperBackup[]>([]);
   async function reloadBackups(){try{const result=await get<{items:PaperBackup[]}>('/api/v1/stage1/backups');setPaperBackups(result.items);}catch(e){setError(String(e));}}
@@ -72,7 +78,7 @@ export function Stage1Page(){
   async function decideApproval(request_id:string,approve:boolean){await action(async()=>{const r=await post<{items:Approval[]}>('/api/v1/stage1/approvals/decide',{request_id,approve});setApprovals(r.items);},approve?'가상 주문 승인을 기록했습니다. 실제 체결은 별도 재검증 필요.':'승인 요청을 거부했습니다.');}
 
   async function refresh(){try{const f=await get<State>('/api/v1/stage1/account');get<typeof performance>('/api/v1/stage1/performance').then(x=>setPerformance(x)).catch(()=>setPerformance(null));const p=await get<{accounts:A[]}>('/api/v1/stage1/portfolios');setFund(f);setAccounts(p.accounts);setError('');}catch(e){setError(String(e));}}
-  useEffect(()=>{void refresh();void reloadControls();void reloadBackups();void refreshCards();void refreshCardHistory();get<typeof preferences>('/api/v1/stage1/preferences').then(setPreferences).catch(()=>{});get<{weights:Record<string,number>;locked:boolean;next_change_at:string|null}>('/api/v1/stage1/strategy-weights').then(r=>{setStrategyWeights(r.weights);setStrategyLock(r);}).catch(()=>{});void refreshDecisions();void refreshImpacts();get<typeof fundingPolicy>('/api/v1/stage1/funding-allocation').then(setFundingPolicy).catch(()=>{});get<{items:typeof dailyReports}>('/api/v1/stage1/daily-reports').then(x=>setDailyReports(x.items)).catch(()=>{});void discover();get<{status:string;usd_krw?:string;as_of?:string}>('/api/v1/stage1/fx').then(setFx).catch(()=>{});(['US','KR'] as const).forEach(region=>get<{items:Article[]}>('/api/v1/stage1/news/'+region).then(x=>setNews(prev=>({...prev,[region]:x.items||[]}))).catch(()=>{}));},[]);
+  useEffect(()=>{void refresh();void reloadControls();void reloadInbox();void reloadBackups();void refreshCards();void refreshCardHistory();get<typeof preferences>('/api/v1/stage1/preferences').then(setPreferences).catch(()=>{});get<{weights:Record<string,number>;locked:boolean;next_change_at:string|null}>('/api/v1/stage1/strategy-weights').then(r=>{setStrategyWeights(r.weights);setStrategyLock(r);}).catch(()=>{});void refreshDecisions();void refreshImpacts();get<typeof fundingPolicy>('/api/v1/stage1/funding-allocation').then(setFundingPolicy).catch(()=>{});get<{items:typeof dailyReports}>('/api/v1/stage1/daily-reports').then(x=>setDailyReports(x.items)).catch(()=>{});void discover();get<{status:string;usd_krw?:string;as_of?:string}>('/api/v1/stage1/fx').then(setFx).catch(()=>{});(['US','KR'] as const).forEach(region=>get<{items:Article[]}>('/api/v1/stage1/news/'+region).then(x=>setNews(prev=>({...prev,[region]:x.items||[]}))).catch(()=>{}));},[]);
   useEffect(()=>{let active=true;const fetchStatus=()=>{get<{enabled:boolean;last_checked_at:string|null;last_result:{status:string;reason?:string;symbol?:string}}>('/api/v1/stage1/auto-status').then(x=>{if(active)setAuto(x);}).catch(()=>{});};fetchStatus();const handle=setInterval(fetchStatus,60_000);return()=>{active=false;clearInterval(handle);};},[]);
   useEffect(()=>{get<{orders:typeof orders}>(`/api/v1/stage1/portfolios/${encodeURIComponent(selected)}/orders`).then(x=>setOrders(x.orders)).catch(()=>setOrders([]));},[selected,accounts.length]);
   const current=accounts.find(x=>x.id===selected)||accounts[0];
@@ -96,6 +102,14 @@ export function Stage1Page(){
           </article>)}</div>
         <p className="s1-desc">{decisionReport.coverage_limitations.join(' · ')}</p>
       </> : <p className="s1-desc">계좌·가격 검증 대기</p>}
+    </section>
+    <section className="s1-panel"><div className="s1-panelhead"><h2>가상투자 알림함 · 미확인 {unreadCount}건</h2><button className="s1-outline" onClick={()=>void reloadInbox()}>알림 새로고침</button></div>
+      <p className="s1-desc">승인 요청, 가상거래 중지·재개, 일일 보고서 생성에 관한 로컬 알림입니다. 실시간 가격 경보나 휴대전화 푸시는 아닙니다.</p>
+      {inboxItems.filter(n=>!n.read_at).slice(0,6).map(n=><article className="s1-candidate" key={n.event_id}>
+        <h3>{n.title}</h3><p>{n.detail}</p><small>{n.created_at}</small>
+        <button className="s1-outline" disabled={busy} onClick={()=>void markInboxRead(n.event_id)}>읽음 처리</button>
+      </article>)}
+      {!unreadCount&&<p className="s1-empty">새 알림이 없습니다.</p>}
     </section>
     <section className="s1-panel"><div className="s1-panelhead"><h2>모의거래 긴급 중지</h2><span>{paperControl?.paused?'가상 자동주문 중지':'가상 자동주문 허용'}</span></div>
       <p className="s1-desc">현재 상태: {paperControl?.reason??'상태 확인 중'}. 새 환경은 기본 중지입니다. 켜더라도 시세·위험 검사에 실패하면 가상 매매는 실행되지 않습니다.</p>
