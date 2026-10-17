@@ -527,6 +527,47 @@ def create_app(
             kind: str
             symbol: str
 
+        @app.get("/api/v1/stage1/quantitative")
+        def stage3_quantitative(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
+            """All candidate quant scores are cache-based and cannot trade."""
+            from .stage1_quantitative import QuantEngine
+            from .stage1_decisions import CATALOG
+            from .stage1_strategy_policy import StrategyPolicy
+            accounts=portfolio_store.list(actor.owner_id)["accounts"]
+            holdings=[h for account in accounts for h in account["holdings"]]
+            candidates=[{"symbol":sym,"name":name,"region":market,"kind":kind}
+                        for sym,name,market,kind,*_ in CATALOG]
+            known={x["symbol"] for x in candidates}
+            for h in holdings:
+                if h["symbol"] not in known and len(candidates)<20:
+                    candidates.append({"symbol":h["symbol"],"kind":"UNVERIFIED",
+                                       "name":h["symbol"]})
+                    known.add(h["symbol"])
+            weights=stage1_strategy_policy.get(actor.owner_id)["weights"]
+            return QuantEngine(stage2_store).batch(candidates,weights,holdings=holdings)
+
+        @app.get("/api/v1/stage1/quantitative/{symbol}")
+        def stage3_quantitative_symbol(symbol: str,
+                                       actor: Actor = Depends(current_actor)) -> dict[str, Any]:
+            """Research any listed symbol, without calling a market provider."""
+            from .stage1_quantitative import QuantEngine
+            from .stage1_catalog import ensure_seed,search
+            from .stage1_market_store import ALLOWED_SYMBOL
+            code=symbol.upper()
+            if not ALLOWED_SYMBOL.fullmatch(code) or code in ("US","KR","USD/KRW"):
+                raise _error(400,"INVALID_RESEARCH_SYMBOL","종목코드를 확인해 주세요.")
+            ensure_seed(portfolio_store)
+            matches=search(portfolio_store,code,limit=15)["items"]
+            entry=next((x for x in matches if x["symbol"]==code),None)
+            if entry is None:
+                raise _error(404,"RESEARCH_SYMBOL_NOT_LISTED",
+                             "현재 종목 목록에 등록된 종목을 먼저 선택해 주세요.")
+            accounts=portfolio_store.list(actor.owner_id)["accounts"]
+            holdings=[h for account in accounts for h in account["holdings"]]
+            weights=stage1_strategy_policy.get(actor.owner_id)["weights"]
+            result=QuantEngine(stage2_store).batch([entry],weights,holdings=holdings)
+            return result["items"][0]
+
         @app.get("/api/v1/stage1/reference/health")
         def stage2_reference_health(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
             import os
