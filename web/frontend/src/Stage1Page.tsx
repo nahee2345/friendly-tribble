@@ -57,7 +57,7 @@ export function Stage1Page(){
   const [performance,setPerformance]=useState<{complete:boolean;contributions_krw:number;portfolio_value_krw:string|null;return_krw:string|null;return_pct:string|null;missing:{account:string;symbol:string;reason:string}[]}|null>(null);
   const [auto,setAuto]=useState<{enabled:boolean;last_checked_at:string|null;last_result:{status:string;reason?:string;symbol?:string;domestic?:{account:string;status:string;symbol?:string;reason?:string}[];exits?:{account:string;status:string;symbol:string;side?:string}[]}}|null>(null);
   const [busy,setBusy]=useState(false);const [error,setError]=useState('');const [notice,setNotice]=useState('');
-  type Approval={request_id:string;account:string;symbol:string;side:string;quantity:number;amount_krw:number;rationale:string;status:string;expires_at:string};
+  type Approval={request_id:string;account:string;symbol:string;side:string;quantity:number;amount_krw:number;rationale:string;status:string;expires_at:string;executed:boolean};
   const [paperControl,setPaperControl]=useState<{paused:boolean;reason:string}|null>(null);
   type InboxMessage={event_id:string;title:string;detail:string;created_at:string;read_at:string|null};
   const [inboxItems,setInboxItems]=useState<InboxMessage[]>([]);
@@ -75,6 +75,13 @@ export function Stage1Page(){
     get<{items:Approval[]}>('/api/v1/stage1/approvals').then(r=>setApprovals(r.items)).catch(()=>{});}
   async function togglePaper(paused:boolean){await action(async()=>{setPaperControl(await post('/api/v1/stage1/trade-control',{paused,reason:paused?'사용자 긴급 중지':'사용자 가상운용 허용'}));},
     paused?'모의투자 자동 주문을 중지했습니다.':'가상 투자 검토를 허용했습니다.');}
+  async function executeApprovedOrder(a:Approval){await action(async()=>{
+    const result=await post<{status?:string;reason?:string}>('/api/v1/stage1/order',{
+      portfolio:a.account,symbol:a.symbol,side:a.side,quantity:a.quantity,request_id:a.request_id});
+    if(result.status==='approval_required'||result.status==='approval_pending')
+      throw Error(result.reason??'승인 시점보다 주문 비용이 상승했거나 추가 승인이 필요합니다.');
+    await reloadControls();
+  },'승인된 가상 주문을 최신 시세·잔액으로 검증해 기록했습니다.');}
   async function decideApproval(request_id:string,approve:boolean){await action(async()=>{const r=await post<{items:Approval[]}>('/api/v1/stage1/approvals/decide',{request_id,approve});setApprovals(r.items);},approve?'가상 주문 승인을 기록했습니다. 실제 체결은 별도 재검증 필요.':'승인 요청을 거부했습니다.');}
 
   async function refresh(){try{const f=await get<State>('/api/v1/stage1/account');get<typeof performance>('/api/v1/stage1/performance').then(x=>setPerformance(x)).catch(()=>setPerformance(null));const p=await get<{accounts:A[]}>('/api/v1/stage1/portfolios');setFund(f);setAccounts(p.accounts);setError('');}catch(e){setError(String(e));}}
@@ -117,9 +124,18 @@ export function Stage1Page(){
     </section>
     <section className="s1-panel"><div className="s1-panelhead"><h2>모의거래 승인 대기</h2><button className="s1-outline" onClick={()=>void reloadControls()}>새로고침</button></div>
       <p className="s1-desc">30만원 이상 수동 모의주문은 승인 대기하며 24시간 후 만료됩니다. 승인만으로 실제 거래·모의 체결은 일어나지 않습니다.</p>
-      {approvals.filter(a=>a.status==='PENDING').map(a=><article className="s1-candidate" key={a.request_id}><h3>{a.symbol} · {a.side} · {money(a.amount_krw)}원</h3><p>{a.account} / {a.quantity}주 / 만료: {a.expires_at}</p><p>{a.rationale}</p>
-        <div className="s1-candidate-actions"><button className="s1-outline" disabled={busy} onClick={()=>void decideApproval(a.request_id,false)}>거절</button><button className="s1-primary" disabled={busy} onClick={()=>void decideApproval(a.request_id,true)}>승인 기록</button></div></article>)}
-      {!approvals.some(a=>a.status==='PENDING')&&<p className="s1-empty">승인 대기 중인 주문이 없습니다.</p>}
+      {approvals.filter(a=>(a.status==='PENDING'||a.status==='APPROVED')&&!a.executed).map(a=>
+        <article className="s1-candidate" key={a.request_id}>
+          <h3>{a.symbol} · {a.side} · {money(a.amount_krw)}원</h3>
+          <p>{a.account} / {a.quantity}주 · {a.status} · 승인 만료: {a.expires_at}</p><p>{a.rationale}</p>
+          <div className="s1-candidate-actions">
+            {a.status==='PENDING'?<>
+              <button className="s1-outline" disabled={busy} onClick={()=>void decideApproval(a.request_id,false)}>거절</button>
+              <button className="s1-primary" disabled={busy} onClick={()=>void decideApproval(a.request_id,true)}>승인 기록</button>
+            </>:<button className="s1-primary" disabled={busy||paperControl?.paused} onClick={()=>void executeApprovedOrder(a)}>승인된 가상 주문 실행 · 시세 재검증</button>}
+          </div>
+        </article>)}
+            {!approvals.some(a=>(a.status==='PENDING'||a.status==='APPROVED')&&!a.executed)&&<p className="s1-empty">승인 대기 중인 주문이 없습니다.</p>}
     </section>
     <section className="s1-panel"><div className="s1-panelhead"><h2>자동 가상투자 운용</h2><span>{auto?.enabled?'서버 실행 중':'검토 대기'}</span></div>
       <p className="s1-desc">서버 가동 중 약 1시간마다 지연 시세를 확인합니다. 검증되지 않은 주문은 건너뜁니다.</p>
