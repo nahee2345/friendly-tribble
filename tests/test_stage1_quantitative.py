@@ -337,3 +337,35 @@ def test_strategy_sort_and_partial_coverage_are_stable(tmp_path):
     assert first["items"][0]["coverage_pct"]==100
     assert first["items"][1]["score"] is None
     assert first["items"][1]["coverage_pct"]==60
+
+
+def test_negative_earnings_reduces_low_pb_research_score(tmp_path):
+    positive=populated(tmp_path)
+    weights={k:0 for k in DEFAULT_WEIGHTS};weights["value"]=100
+    before=QuantEngine(positive).batch([{"symbol":"AAPL","kind":"STOCK"}],
+                                      weights,now=NOW)["items"][0]
+    fact=[dict(row) for row in annual_facts()]
+    for row in fact:
+        if row["tag"]=="NetIncomeLoss":row["value"]="-1000"
+    # A separate verified observation supplants the old factual record.
+    save(positive,"FUNDAMENTALS","AAPL","SEC_EDGAR",SEC_URL,
+         {"status":"ok","symbol":"AAPL","facts":fact})
+    after=QuantEngine(positive).batch([{"symbol":"AAPL","kind":"STOCK"}],
+                                     weights,now=NOW)["items"][0]
+    assert after["score"]<before["score"]
+    assert any("가치함정" in x for x in after["risk_reasons"])
+
+
+def test_comparable_revenue_tag_preferred_over_incomplete_other_tag(tmp_path):
+    cache=MarketStore(tmp_path/"compare.sqlite3")
+    # A single recent ContractRevenue is NOT comparable with prior Revenues.
+    # Two Revenues annual facts must be compared with each other.
+    facts=annual_facts()+[_fact("RevenueFromContractWithCustomerExcludingAssessedTax",
+                                9000,YEAR_CURRENT,date(2024,10,1))]
+    save(cache,"FUNDAMENTALS","AAPL","SEC_EDGAR",SEC_URL,
+         {"status":"ok","symbol":"AAPL","facts":facts})
+    weights={k:0 for k in DEFAULT_WEIGHTS};weights["growth"]=100
+    result=QuantEngine(cache).batch([{"symbol":"AAPL","kind":"STOCK"}],
+                                    weights,now=NOW)["items"][0]
+    assert result["strategies"]["growth"]["status"]=="scored"
+    assert result["strategies"]["growth"]["metrics"]["revenue_yoy_pct"]==20
