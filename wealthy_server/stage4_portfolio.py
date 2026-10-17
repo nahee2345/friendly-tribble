@@ -307,10 +307,13 @@ class PortfolioEngine:
         # A risk-triggered exit suppresses all same-day BUY orders in that
         # account (no immediate re-entry into a different fund or stock).
         exit_accounts={order["account"] for order in orders if order["side"]=="SELL"}
+        exit_sleeves={(order["market"],order["kind"]) for order in orders
+                      if order["side"]=="SELL"}
         # One opportunity per target sleeve. Account cash is not silently
         # transferred; if account funding is insufficient, report a blocker.
         for market,kind in (("US","ETF"),("US","STOCK"),("KR","ETF"),("KR","STOCK")):
             group=(market,kind)
+            if group in exit_sleeves:continue
             deficit=gaps[group]
             if not complete or deficit<=0 or remaining<=0:continue
             acceptable=[r for r in assessed if
