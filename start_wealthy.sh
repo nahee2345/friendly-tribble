@@ -12,10 +12,9 @@ if [ ! -f "$VENV/bin/python" ]; then
 fi
 PY="$PWD/$VENV/bin/python"
 export PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
-if [ ! -f web/frontend/dist/index.html ]; then
-  if [ ! -d web/frontend/node_modules ]; then npm --prefix web/frontend ci; fi
-  npm --prefix web/frontend run build
-fi
+if [ ! -d web/frontend/node_modules ]; then npm --prefix web/frontend ci; fi
+# Rebuild after every update; cached node_modules avoids repeated downloads.
+npm --prefix web/frontend run build
 mkdir -p "$DATA_DIR"
 chmod 700 "$DATA_DIR"
 # Read-only inspection; never resets an existing database, account or password.
