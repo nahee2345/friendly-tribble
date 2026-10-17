@@ -433,3 +433,18 @@ def test_corporate_event_even_marked_reconciled_stops_unadjusted_inventory(tmp_p
     assert not data["valuation_complete"]
     assert "권리변경" in data["missing"][0]
     assert data["market_valuation_krw"] is None
+
+
+def test_cash_only_and_foreign_only_do_not_claim_isa_tax_savings(tmp_path):
+    ledger,p,cache,engine=environment(tmp_path)
+    empty=engine.report("alice",now=NOW)
+    assert empty["tax_illustrations"]["status"]=="no_eligible_exposure"
+    assert empty["tax_illustrations"]["domestic_isa"] is None
+    p.auto_buy_usd_with_fx("alice","VOO",quote("VOO",100),"1400",
+                           "isa-ineligible-us-01")
+    market(cache,prices={"VOO":"105"})
+    foreign=engine.report("alice",now=NOW)
+    assert foreign["tax_illustrations"]["status"]=="no_eligible_exposure"
+    assert foreign["tax_illustrations"]["domestic_isa"] is None
+    assert any(x["symbol"]=="VOO" for x in foreign["tax_illustrations"]["excluded"])
+    assert foreign["tax_illustrations"]["foreign_isa_eligible"] is False
