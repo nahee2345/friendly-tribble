@@ -17,6 +17,7 @@ from .stage1_autorun import paper_run_once
 from .stage1_domestic import paper_run_domestic
 from .stage1_risk import paper_exit_review
 from .stage1_diary import save_daily_paper_report
+from .stage1_strategy_policy import StrategyPolicy
 
 log = logging.getLogger("wealthy.paper.worker")
 
@@ -42,7 +43,10 @@ class PaperWorker:
         today = datetime.now(ZoneInfo("Asia/Seoul")).date()
         initialize_paper_accounts(owner, self.ledger, self.portfolios, today=today)
         exit_result = paper_exit_review(owner, self.portfolios, today=today)
-        result = paper_run_once(owner, self.ledger, self.portfolios, self.preferences, today=today)
+        weights = StrategyPolicy(self.portfolios).get(owner)["weights"]
+        result = paper_run_once(owner, self.ledger, self.portfolios,
+                                self.preferences, today=today,
+                                strategy_weights=weights)
         domestic_result = paper_run_domestic(owner, self.portfolios, today=today)
         save_daily_paper_report(owner, self.portfolios, us=result, domestic=domestic_result, exits=exit_result)
         self.last_result = {'status': result.get('status', 'unknown'),
