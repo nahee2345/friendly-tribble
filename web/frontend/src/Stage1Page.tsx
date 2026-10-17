@@ -152,7 +152,7 @@ export function Stage1Page(){
       {stage4Plan?.review.slice(0,10).map((r,i)=><p className="s1-desc" key={i}>
         {r.symbol} · {r.account} · {r.reason}{r.approval_required?' · 자동체결 금지 / 별도 승인 필요':''}
       </p>)}
-      <button className="s1-primary" disabled={busy||paperControl?.paused||stage4Plan?.status!=='ready'||!stage4Plan?.proposed_orders.length}
+      <button className="s1-primary" disabled={busy||paperControl?.paused||!stage4Plan?.trade_enabled||stage4Plan?.status!=='ready'||!stage4Plan?.proposed_orders.length}
         onClick={()=>void runStage4()}>{busy?'검증 중…':'통합 계획으로 가상 모의투자 1회 실행'}</button>
       <p className="s1-desc">긴급 중지 해제 시에만 실행됩니다. 주문 실행 전 매수가격 편차·원화환산 투자한도·현금유보·중복 요청을 재검증합니다. 30만원 이상 자동체결은 허용하지 않습니다.</p>
       <details><summary>최근 통합 주문 원장 {stage4History.length}건 · 결과 대조</summary>
