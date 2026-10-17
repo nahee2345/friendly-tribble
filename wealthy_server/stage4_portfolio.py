@@ -145,6 +145,8 @@ def _schema(db):
         PRIMARY KEY(owner,request_id))""")
     db.execute("""CREATE INDEX IF NOT EXISTS idx_stage4_claim_date
                   ON stage4_execution_claims(owner,created_utc,status)""")
+    db.execute("""CREATE INDEX IF NOT EXISTS idx_stage4_order_day
+                  ON virtual_orders(owner,created_at,side)""")
 
 
 def recorded_claims(owner,portfolios,*,limit=30):
@@ -402,6 +404,7 @@ class PortfolioEngine:
                 "portfolio_value_krw":str(total) if complete else None,
                 "cash_krw_equivalent":str(cash_krw) if complete else None,
                 "reserve_percent":str(reserve*100),
+                "policy_prefs":prefs,"policy_weights":weights,
                 "daily_spend_cap_krw":str(daily_cap) if complete else None,
                 "allocation":target_exposure if complete else {},
                 "proposed_orders":orders,"review":watches,
@@ -513,21 +516,73 @@ class PortfolioEngine:
                             claims.append({"request_id":key,"symbol":choice["symbol"],
                                            "status":"skipped","reason":"CASH_RESERVE_OR_BALANCE_CHANGED"})
                             continue
-                    # Check all same-date executed BUY amounts, not just this
-                    # iteration, so two browser/worker runs cannot bypass the
-                    # portfolio-wide daily spend cap.
+                    # A change to preferences or strategy weights after
+                    # planning invalidates the authorization for this fill.
+                    pref=db.execute("""SELECT us_weight,etf_weight
+                        FROM stage1_preferences WHERE owner=?""",(owner,)).fetchone()
+                    expected_prefs=plan["policy_prefs"]
+                    saved_prefs=pref if pref else (90,80)
+                    if saved_prefs!=(expected_prefs["us_weight"],expected_prefs["etf_weight"]):
+                        db.execute("COMMIT")
+                        claims.append({"request_id":key,"symbol":choice["symbol"],
+                                       "status":"skipped","reason":"POLICY_CHANGED_AFTER_PLAN"})
+                        continue
+                    from .stage1_strategy_policy import DEFAULT_WEIGHTS
+                    rows=db.execute("""SELECT strategy,weight FROM stage1_strategy_weights
+                        WHERE owner=?""",(owner,)).fetchall()
+                    observed_policy=dict(rows) if rows else DEFAULT_WEIGHTS.copy()
+                    if observed_policy!=plan["policy_weights"]:
+                        db.execute("COMMIT")
+                        claims.append({"request_id":key,"symbol":choice["symbol"],
+                                       "status":"skipped","reason":"STRATEGY_CHANGED_AFTER_PLAN"})
+                        continue
+                    # Concurrent manual fills also consume the daily cash
+                    # budget. Executed Stage4 claims are counted from fills;
+                    # only unfilled claims are counted separately.
+                    day_kst=_signed_day(now)
+                    start=datetime.combine(day_kst,datetime.min.time(),tzinfo=KST).astimezone(timezone.utc)
+                    end=start+timedelta(days=1)
+                    completed=db.execute("""SELECT portfolio,request_id,quantity,
+                        price,currency FROM virtual_orders
+                        WHERE owner=? AND side='BUY' AND created_at>=?
+                        AND created_at<?""",
+                        (owner,start.isoformat(),end.isoformat())).fetchall()
+                    used=Decimal(0)
+                    complete_keys=set()
+                    for account_id,request,qty,unit_price,currency in completed:
+                        converted=rate if currency=="USD" else Decimal(1)
+                        if converted is None:
+                            raise ValueError("MISSING_FX_FOR_HISTORICAL_DAILY_CAP")
+                        used+=_decimal(unit_price)*_decimal(qty)*converted
+                        complete_keys.add((account_id,request))
+                    prefix=f"s4:{day_kst:%Y%m%d}:"
+                    claims_day=db.execute("""SELECT account,request_id,notional_krw
+                        FROM stage4_execution_claims
+                        WHERE owner=? AND side='BUY' AND
+                        status IN ('CLAIMED','EXECUTED') AND
+                        request_id LIKE ?""",(owner,prefix+"%")).fetchall()
+                    for account_id,request,nominal in claims_day:
+                        if (account_id,request) not in complete_keys:
+                            used+=_decimal(nominal)
+                    allowed=_decimal(plan["daily_spend_cap_krw"])
+                    if used+actual>allowed:
+                        db.execute("COMMIT")
+                        claims.append({"request_id":key,"symbol":choice["symbol"],
+                                       "status":"skipped","reason":"DAILY_CAP_EXCEEDED"})
+                        continue
                     if choice["side"]=="BUY":
-                        today_prefix=f"s4:{_signed_day(now):%Y%m%d}:"
-                        previous=db.execute("""SELECT notional_krw FROM stage4_execution_claims
-                            WHERE owner=? AND status IN ('CLAIMED','EXECUTED')
-                            AND side='BUY' AND request_id LIKE ?""",
-                            (owner,today_prefix+"%")).fetchall()
-                        used=sum((_decimal(row[0]) for row in previous),Decimal(0))
-                        allowed=_decimal(plan["daily_spend_cap_krw"])
-                        if used+actual>allowed:
+                        holdings_now=db.execute("""SELECT
+                            COALESCE(SUM(CASE WHEN side='BUY' THEN quantity
+                                ELSE -quantity END),0)
+                            FROM virtual_orders WHERE owner=? AND symbol=?""",
+                            (owner,choice["symbol"])).fetchone()[0]
+                        cap=(SINGLE_ETF_CAP if choice["kind"]=="ETF"
+                             else SINGLE_STOCK_CAP)*_decimal(plan["portfolio_value_krw"])
+                        if (holdings_now+choice["quantity"])*live*(
+                                rate if expected=="USD" else Decimal(1))>cap:
                             db.execute("COMMIT")
                             claims.append({"request_id":key,"symbol":choice["symbol"],
-                                           "status":"skipped","reason":"DAILY_CAP_EXCEEDED"})
+                                           "status":"skipped","reason":"CONCENTRATION_CAP_CHANGED"})
                             continue
                     db.execute("""INSERT INTO stage4_execution_claims VALUES
                         (?,?,?,?,?,?,?,?,?,?,?,?)""",
