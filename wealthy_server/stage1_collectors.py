@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
@@ -168,6 +169,7 @@ class Collector:
         self.store=store
         self.quote=quote;self.history_us=history_us;self.history_kr=history_kr
         self.fx=fx;self.news=news;self.dividends=dividends;self.fundamentals=fundamentals
+        self._news_memo=None
 
     def _fetch(self,kind,symbol):
         if kind=="PRICE":return self.quote(symbol)
@@ -177,7 +179,12 @@ class Collector:
         if kind=="DIVIDENDS":return self.dividends(symbol)
         if kind=="FUNDAMENTALS":return self.fundamentals(symbol)
         if kind=="NEWS":
-            bundle=self.news()
+            # The same public RSS collection covers US and KR. Do not
+            # download both identical source feeds twice in one worker tick.
+            tick=time.monotonic()
+            if self._news_memo is None or tick-self._news_memo[0]>60:
+                self._news_memo=(tick,self.news())
+            bundle=self._news_memo[1]
             if symbol in bundle.get("unavailable",[]):
                 return {"status":"unavailable","reason":"NEWS_FEED_UNAVAILABLE"}
             articles=[x for x in bundle.get("items",[]) if x.get("market")==symbol]
