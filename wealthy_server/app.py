@@ -434,6 +434,11 @@ def create_app(
                 raise _error(400, "INVALID_STRATEGY_WEIGHTS",
                              "8개 투자전략의 정수 비율을 합계 100%로 입력하세요.") from None
 
+        @app.get("/api/v1/stage1/news-impact")
+        def stage1_news_impact(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
+            from .stage1_news_impact import portfolio_news_impacts
+            return portfolio_news_impacts(actor.owner_id, portfolio_store)
+
         @app.get("/api/v1/stage1/decisions")
         def stage1_decisions(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
             from .stage1_decisions import proposal
