@@ -91,7 +91,7 @@ def sec_facts(symbol,*,fetcher=None,contact=None):
     if not isinstance(symbol,str) or not re.fullmatch(r"[A-Z][A-Z0-9.\-]{0,14}",symbol):
         return {"status":"unavailable","reason":"INVALID_SYMBOL"}
     contact=contact if contact is not None else os.environ.get("WEALTHY_SEC_CONTACT","")
-    if not isinstance(contact,str) or not re.fullmatch(r"[^\s@]{1,64}@[^\s@]{1,190}",contact):
+    if not isinstance(contact,str) or not re.fullmatch(r"[A-Za-z0-9._%+\-]{1,64}@[A-Za-z0-9.\-]{1,190}\.[A-Za-z]{2,24}",contact):
         return {"status":"unavailable","reason":"SEC_CONTACT_NOT_CONFIGURED"}
     fetch=fetcher or urllib.request.urlopen
     def download(url,max_bytes):
@@ -199,19 +199,28 @@ class Collector:
                     "cached":self.store.latest(kind,symbol,now=clock)["status"]}
         ttl={"PRICE":3600,"HISTORY":21600,"FX":3600,"NEWS":3600,
              "DIVIDENDS":86400,"FUNDAMENTALS":86400}[kind]
+        reason="PROVIDER_CALL_FAILED"
         try:
             raw=self._fetch(kind,symbol)
             if not isinstance(raw,dict) or raw.get("status")!="ok":
-                reason=raw.get("reason") if isinstance(raw,dict) else None
-                raise ValueError(reason or "PROVIDER_UNAVAILABLE")
+                reported=raw.get("reason") if isinstance(raw,dict) else None
+                reason=(reported if isinstance(reported,str)
+                        and re.fullmatch(r"[A-Z_]{2,45}",reported)
+                        else "PROVIDER_UNAVAILABLE")
+                raise ValueError("unverified provider response")
             url=raw.get("source_url")
-            if not url:raise ValueError("SOURCE_URL_MISSING")
+            if not url:
+                reason="SOURCE_URL_MISSING"
+                raise ValueError("missing provenance url")
             if kind=="NEWS" and symbol not in ("US","KR"):
-                raise ValueError("INVALID_NEWS_MARKET")
+                reason="INVALID_NEWS_MARKET"
+                raise ValueError("invalid news market")
             if kind=="FUNDAMENTALS" and symbol.isdigit():
-                raise ValueError("KR_SEC_FACTS_UNSUPPORTED")
+                reason="KR_SEC_FACTS_UNSUPPORTED"
+                raise ValueError("unsupported Korean SEC facts")
             # Reject mismatched source, currency, future dates and malformed
             # records before inserting anything into the cache.
+            reason="QUALITY_VALIDATION_FAILED"
             snapshot=validated_snapshot(kind,symbol,provider,url,raw,now=clock)
             stored=self.store.save(snapshot)
             self.store.record_attempt(kind,symbol,provider,"ok",now=clock,
@@ -220,10 +229,10 @@ class Collector:
                     "recorded":stored["saved"],"sha256":stored["sha256"]}
         except (ValueError,KeyError,TypeError,OverflowError,OSError,TimeoutError):
             self.store.record_attempt(kind,symbol,provider,"unavailable",
-                                      error_code="SOURCE_OR_VALIDATION_FAILED",
+                                      error_code=reason,
                                       now=clock,retry_seconds=max(ttl,3600))
             return {"status":"unavailable","kind":kind,"symbol":symbol,
-                    "reason":"SOURCE_OR_VALIDATION_FAILED",
+                    "reason":reason,
                     "old_snapshot":self.store.latest(kind,symbol,now=clock)["status"]}
 
     def tick(self,owner,portfolios,*,max_requests=7):
@@ -243,6 +252,10 @@ class Collector:
         tasks.extend(("PRICE",s) for s in dict.fromkeys(universe))
         tasks.extend(("HISTORY",s) for s in dict.fromkeys(universe[:4]))
         tasks.extend(("DIVIDENDS",s) for s in dict.fromkeys(universe[:4]))
+        # SEC official companyfacts is keyless but requires a declared,
+        # valid contact. It is not part of mandatory portfolio execution.
+        tasks.extend(("FUNDAMENTALS",s) for s in dict.fromkeys(
+            x for x in universe[:4] if not x.isdigit()))
         attempted=[]
         for kind,symbol in tasks:
             if len(attempted)>=max_requests:break
