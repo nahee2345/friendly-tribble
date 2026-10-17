@@ -125,7 +125,24 @@ def proposal(owner, portfolios, preference_store, strategy_store, *,
         }
     with ThreadPoolExecutor(max_workers=4) as pool:
         items = list(pool.map(evaluate, CATALOG))
-    items.sort(key=lambda x:(x["status"]!="검토 가능", -x["priority_score"], x["symbol"]))
+    known = {item["symbol"] for item in items}
+    for existing in positions:
+        code=existing["symbol"]
+        if code in known:
+            continue
+        a=accounts[existing["account"]]
+        items.append({
+            "symbol":code,"name":code,"region":"US" if a["kind"]=="GENERAL_OVERSEAS" else "KR",
+            "kind":"UNVERIFIED","account":existing["account"],"exposure":"미분류 보유자산",
+            "priority_score":0,"status":"보류","quantity_suggestion":0,
+            "price":None,"currency":"USD" if a["kind"]=="GENERAL_OVERSEAS" else "KRW",
+            "as_of":None,"source":None,"holding":True,"decision":"보유 관찰",
+            "holding_horizon":"매일 시세·위험 확인, 데이터 검증 전 기간 예측 보류",
+            "exit_review":"가격과 원가 검증 이후 재검토",
+            "why":["기존 가상 보유종목입니다. 분석 대상 목록에 없어 자동 추천점수 산정 제외"],
+            "risks":["자료 미확인","현재 가격·계좌 상품 적격성 검증 필요"]
+        })
+    items.sort(key=lambda x:(not x["holding"], x["status"]!="검토 가능", -x["priority_score"], x["symbol"]))
     return {
         "status":"ok", "generated_kst":datetime.now(ZoneInfo("Asia/Seoul")).isoformat(),
         "mode":"SIMULATED_RESEARCH", "account_routing":"미국상장 주식→미국계좌, 국내 ETF→ISA 우선",
