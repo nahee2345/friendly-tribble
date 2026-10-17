@@ -64,18 +64,15 @@ def paper_run_once(owner, ledger, portfolios, preferences, *, today=None,
     if symbol is None:
         return {'status': 'skipped', 'traded': False,
                 'reason': '한도 내에서 시세가 검증된 ETF가 없습니다.'}
-    gap = max(Decimal('0'), price - Decimal(default['usd_cash']))
-    if gap:
-        amount = int((gap * rate).to_integral_value(rounding=ROUND_UP)) + 100
-        if amount > int(Decimal(default['krw_cash'])):
-            return {'status': 'skipped', 'traded': False, 'reason': '원화 가상 잔액 부족'}
-        ledger.exchange(owner, amount, str(rate), f'auto-fx:{day:%Y%m%d}:etf')
     try:
-        result = portfolios.trade(owner, 'default', symbol, 'BUY', 1,
-                                  request_id, evidence['quote'])
-    except ValueError:
+        result = portfolios.auto_buy_usd_with_fx(
+            owner, symbol, evidence['quote'], str(rate), request_id)
+    except (ValueError, KeyError, ArithmeticError):
         return {'status': 'skipped', 'traded': False,
                 'reason': '잔액·시세·원장 검증으로 주문이 거부되었습니다.'}
+    if result['status'] == 'already_executed':
+        return {'status': 'already_executed', 'traded': False,
+                'reason': '동일 날짜 주문이 이미 처리됐습니다.'}
     return {'status': 'executed', 'traded': True, 'symbol': symbol,
             'quantity': 1, 'price_usd': str(price),
             'reference_fx': str(rate), 'evidence': evidence,
