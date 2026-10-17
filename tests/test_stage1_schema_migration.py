@@ -199,3 +199,26 @@ def test_corporate_action_is_recorded_but_does_not_adjust_holdings(tmp_path):
         audit.corporate_event("owner",**{**params,"terms":{"numerator":3}})
     assert audit.overview("owner")["corporate"]==[
         {"category":"SPLIT","status":"PENDING_RECONCILIATION","count":1}]
+
+
+def test_us_simulated_auto_fx_receipt_and_index_coverage(tmp_path):
+    path=tmp_path/"paper.sqlite3"
+    ledger=Stage1Ledger(path)
+    ledger.state("owner",date(2026,10,17))
+    portfolio=Portfolios(path)
+    q={"symbol":"VOO","currency":"USD","price":"95.00",
+       "status":"ok","tradeable":True,"source":"verified daily US close",
+       "as_of":"2026-10-16"}
+    first=portfolio.auto_buy_usd_with_fx("owner","VOO",q,"1400","us-auto-00001")
+    assert first["status"]=="executed"
+    assert portfolio.auto_buy_usd_with_fx(
+        "owner","VOO",q,"1400","us-auto-00001")["status"]=="already_executed"
+    with portfolio._db() as db:
+        record=db.execute("""SELECT foreign_exchange_rate,fee_amount,tax_amount,
+            quote_as_of,source FROM stage1_trade_metadata
+            WHERE owner='owner' AND order_key='us-auto-00001'""").fetchone()
+        assert record==("1400",None,None,"2026-10-16","verified daily US close")
+        assert db.execute("""SELECT COUNT(*) FROM stage1_events
+            WHERE event_key='us-auto-00001:fx'""").fetchone()[0]==1
+        order_indexes={row[1] for row in db.execute("PRAGMA index_list('virtual_orders')")}
+        assert "idx_stage1_orders_history" in order_indexes
