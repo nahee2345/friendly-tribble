@@ -34,6 +34,14 @@ class Portfolios:
         return db
 
     @staticmethod
+    def _assert_not_paused(db,owner):
+        table=db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='stage1_trade_control'").fetchone()
+        if table:
+            row=db.execute("SELECT paused FROM stage1_trade_control WHERE owner=?",(owner,)).fetchone()
+            if row and row[0]:
+                raise ValueError('긴급 중지 중에는 가상 주문을 기록할 수 없습니다.')
+
+    @staticmethod
     def _ensure(db,owner):
         db.execute('INSERT OR IGNORE INTO portfolios VALUES(?,?,?,?,?)',(owner,'default','기본 가상계좌','GENERAL_OVERSEAS',datetime.now(timezone.utc).isoformat()))
 
@@ -108,6 +116,7 @@ class Portfolios:
         with self._db() as db:
             db.execute('BEGIN IMMEDIATE')
             self._ensure(db, owner)
+            self._assert_not_paused(db,owner)
             kind = db.execute("SELECT kind FROM portfolios WHERE owner=? AND id='default'", (owner,)).fetchone()
             if not kind or kind[0] != 'GENERAL_OVERSEAS':
                 raise ValueError('해외 가상계좌 없음')
@@ -151,6 +160,7 @@ class Portfolios:
         if quote['symbol']!=symbol or quote.get('status')!='ok' or quote.get('tradeable') is not True: raise ValueError('검증되지 않은 시세')
         with self._db() as db:
             db.execute('BEGIN IMMEDIATE');self._ensure(db,owner)
+            self._assert_not_paused(db,owner)
             row=db.execute('SELECT kind FROM portfolios WHERE owner=? AND id=?',(owner,portfolio)).fetchone()
             if not row: raise ValueError('계좌 없음')
             if (currency=='USD' and row[0]!='GENERAL_OVERSEAS') or (currency=='KRW' and row[0]=='GENERAL_OVERSEAS'):
