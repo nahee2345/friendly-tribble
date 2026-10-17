@@ -479,7 +479,13 @@ def create_app(
 
         @app.get("/api/v1/stage1/account")
         def stage1_account(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
-            return stage1.state(actor.owner_id)
+            state = stage1.state(actor.owner_id)
+            state["auto_trading_enabled"] = bool(
+                getattr(app.state, "paper_worker", None)
+                and app.state.paper_worker.thread is not None
+                and app.state.paper_worker.thread.is_alive()
+            )
+            return state
 
         @app.post("/api/v1/stage1/exchange")
         def stage1_exchange(body: VirtualFXBody, actor: Actor = Depends(mutation_actor)) -> dict[str, Any]:
