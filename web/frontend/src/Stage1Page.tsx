@@ -59,6 +59,11 @@ export function Stage1Page(){
   const [busy,setBusy]=useState(false);const [error,setError]=useState('');const [notice,setNotice]=useState('');
   type Approval={request_id:string;account:string;symbol:string;side:string;quantity:number;amount_krw:number;rationale:string;status:string;expires_at:string};
   const [paperControl,setPaperControl]=useState<{paused:boolean;reason:string}|null>(null);
+  type PaperBackup={filename:string;bytes:number;modified_utc:string};
+  const [paperBackups,setPaperBackups]=useState<PaperBackup[]>([]);
+  async function reloadBackups(){try{const result=await get<{items:PaperBackup[]}>('/api/v1/stage1/backups');setPaperBackups(result.items);}catch(e){setError(String(e));}}
+  async function createPaperBackup(){await action(async()=>{await post('/api/v1/stage1/backups',{});await reloadBackups();},'가상 원장 백업과 무결성 검사가 완료되었습니다.');}
+
   const [approvals,setApprovals]=useState<Approval[]>([]);
   async function reloadControls(){get<{paused:boolean;reason:string}>('/api/v1/stage1/trade-control').then(setPaperControl).catch(()=>{});
     get<{items:Approval[]}>('/api/v1/stage1/approvals').then(r=>setApprovals(r.items)).catch(()=>{});}
@@ -67,7 +72,7 @@ export function Stage1Page(){
   async function decideApproval(request_id:string,approve:boolean){await action(async()=>{const r=await post<{items:Approval[]}>('/api/v1/stage1/approvals/decide',{request_id,approve});setApprovals(r.items);},approve?'가상 주문 승인을 기록했습니다. 실제 체결은 별도 재검증 필요.':'승인 요청을 거부했습니다.');}
 
   async function refresh(){try{const f=await get<State>('/api/v1/stage1/account');get<typeof performance>('/api/v1/stage1/performance').then(x=>setPerformance(x)).catch(()=>setPerformance(null));const p=await get<{accounts:A[]}>('/api/v1/stage1/portfolios');setFund(f);setAccounts(p.accounts);setError('');}catch(e){setError(String(e));}}
-  useEffect(()=>{void refresh();void reloadControls();void refreshCards();void refreshCardHistory();get<typeof preferences>('/api/v1/stage1/preferences').then(setPreferences).catch(()=>{});get<{weights:Record<string,number>;locked:boolean;next_change_at:string|null}>('/api/v1/stage1/strategy-weights').then(r=>{setStrategyWeights(r.weights);setStrategyLock(r);}).catch(()=>{});void refreshDecisions();void refreshImpacts();get<typeof fundingPolicy>('/api/v1/stage1/funding-allocation').then(setFundingPolicy).catch(()=>{});get<{items:typeof dailyReports}>('/api/v1/stage1/daily-reports').then(x=>setDailyReports(x.items)).catch(()=>{});void discover();get<{status:string;usd_krw?:string;as_of?:string}>('/api/v1/stage1/fx').then(setFx).catch(()=>{});(['US','KR'] as const).forEach(region=>get<{items:Article[]}>('/api/v1/stage1/news/'+region).then(x=>setNews(prev=>({...prev,[region]:x.items||[]}))).catch(()=>{}));},[]);
+  useEffect(()=>{void refresh();void reloadControls();void reloadBackups();void refreshCards();void refreshCardHistory();get<typeof preferences>('/api/v1/stage1/preferences').then(setPreferences).catch(()=>{});get<{weights:Record<string,number>;locked:boolean;next_change_at:string|null}>('/api/v1/stage1/strategy-weights').then(r=>{setStrategyWeights(r.weights);setStrategyLock(r);}).catch(()=>{});void refreshDecisions();void refreshImpacts();get<typeof fundingPolicy>('/api/v1/stage1/funding-allocation').then(setFundingPolicy).catch(()=>{});get<{items:typeof dailyReports}>('/api/v1/stage1/daily-reports').then(x=>setDailyReports(x.items)).catch(()=>{});void discover();get<{status:string;usd_krw?:string;as_of?:string}>('/api/v1/stage1/fx').then(setFx).catch(()=>{});(['US','KR'] as const).forEach(region=>get<{items:Article[]}>('/api/v1/stage1/news/'+region).then(x=>setNews(prev=>({...prev,[region]:x.items||[]}))).catch(()=>{}));},[]);
   useEffect(()=>{let active=true;const fetchStatus=()=>{get<{enabled:boolean;last_checked_at:string|null;last_result:{status:string;reason?:string;symbol?:string}}>('/api/v1/stage1/auto-status').then(x=>{if(active)setAuto(x);}).catch(()=>{});};fetchStatus();const handle=setInterval(fetchStatus,60_000);return()=>{active=false;clearInterval(handle);};},[]);
   useEffect(()=>{get<{orders:typeof orders}>(`/api/v1/stage1/portfolios/${encodeURIComponent(selected)}/orders`).then(x=>setOrders(x.orders)).catch(()=>setOrders([]));},[selected,accounts.length]);
   const current=accounts.find(x=>x.id===selected)||accounts[0];
@@ -163,6 +168,11 @@ export function Stage1Page(){
       <p className="s1-desc">국내 주식은 검증된 가격 공급원과 계좌·세제 검사가 연결되기 전까지 주문할 수 없습니다. 미국 주식도 주문 순간 서버에서 가격을 재확인합니다.</p>
       </section>
     </div>}
+    {section==='overview'&&<section className="s1-panel"><div className="s1-panelhead"><h2>모의계좌 온라인 백업</h2><button className="s1-primary" disabled={busy} onClick={()=>void createPaperBackup()}>지금 백업</button></div>
+      <p className="s1-desc">백업은 가상투자 SQLite 원장만 대상으로 합니다. 관리자 로그인·시장 DB는 별도입니다. 무결성 검사를 통과한 파일만 저장하며 이 화면에서는 복원을 실행하지 않습니다.</p>
+      <p className="s1-desc">저장된 백업 {paperBackups.length}개</p>
+      {paperBackups.slice(0,5).map(b=><p key={b.filename}>{b.filename} · {money(b.bytes)} B · {b.modified_utc}</p>)}
+    </section>}
     {section==='overview'&&<section className="s1-panel"><h2>자동 입금 배분 · 별도 입력 불필요</h2><p className="s1-desc">시장에서 설정한 미국/한국 비중과 ETF/개별주 비중을 기준으로 앞으로 들어오는 월 35만원을 자동 배분합니다. 기존 입금·거래는 변경하지 않습니다.</p>
       <div className="s1-balances"><div><small>미국 일반계좌</small><strong>{fundingPolicy.us_pct}%</strong></div><div><small>한국 일반계좌</small><strong>{fundingPolicy.kr_pct}%</strong></div><div><small>ISA 가상계좌</small><strong>{fundingPolicy.isa_pct}%</strong></div></div>
       <p className="s1-desc">ISA에는 국내 상장 ETF만 허용하며, 실제 중개형 ISA 세금·상품 적격성은 별도 검증이 필요합니다.</p></section>}
