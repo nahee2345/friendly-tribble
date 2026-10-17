@@ -52,7 +52,7 @@ def portfolio_report(owner, portfolios, ledger, *,
             complete = False
             missing.append({"account": account["id"], "symbol": "USD/KRW", "reason": "환율 미확인"})
 
-        orders = portfolios.orders(owner, account["id"])["orders"]
+        orders = portfolios.orders(owner, account["id"],limit=100000)["orders"]
         # LIFO timestamp output -> FIFO for cost-basis reconstruction.
         by_symbol = {}
         for order in reversed(orders):
