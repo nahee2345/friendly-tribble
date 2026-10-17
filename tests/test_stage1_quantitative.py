@@ -293,7 +293,7 @@ def test_sec_collector_keeps_two_annual_and_one_quarterly_period_without_mix():
                 "accn":"0000320193-26-000001"}
     a0=sec_item(fiscal_recent-timedelta(days=364),fiscal_recent,"10-K",6000)
     a1=sec_item(fiscal_older-timedelta(days=364),fiscal_older,"10-K",5000)
-    q0=sec_item(today-timedelta(days=95),today-timedelta(days=7),"10-Q",1500)
+    q0=sec_item(today-timedelta(days=128),today-timedelta(days=40),"10-Q",1500)
     # Accidental quarterly value is higher but must remain identified as Q.
     dataset={"cik":320193,"facts":{"us-gaap":{"Revenues":{"units":{
         "USD":[a0,a1,q0]}}}}}
