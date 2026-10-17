@@ -7,7 +7,6 @@ import {
   AnalysisPage,
   AssetsPage,
   AutomationPage,
-  DashboardPage,
   DividendPage,
   MarketPage,
   NotFoundPage,
