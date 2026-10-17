@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import './stage1.css';
+import {Stage1Dashboard} from './Stage1Dashboard';
 
 type A={id:string;name:string;kind:string;krw_cash:string;usd_cash:string;holdings:{symbol:string;quantity:number}[];trades:number};
 type State={initial_krw:number;monthly_krw:number;deposit_day:number;reinvest:boolean;auto_trading_enabled?:boolean;events:{id:string;kind:string;krw:number;usd:string}[]};
@@ -12,6 +13,7 @@ async function get<T>(path:string):Promise<T>{const r=await fetch(path,{credenti
 async function post<T>(path:string,value:unknown):Promise<T>{const r=await fetch(path,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf()},body:JSON.stringify(value)});if(!r.ok)throw Error(`요청이 거부되었습니다 (${r.status}). 입력·잔액·시세를 확인해 주세요.`);return r.json();}
 const accountTypes:Record<string,string>={GENERAL_OVERSEAS:'해외주식 일반계좌',GENERAL_DOMESTIC:'국내주식 일반계좌',ISA_SIMULATED:'ISA 가상계좌'};
 export function Stage1Page(){
+  const [advanced,setAdvanced]=useState(false);
   const [fund,setFund]=useState<State|null>(null);
   const [accounts,setAccounts]=useState<A[]>([]);
   const [selected,setSelected]=useState('default');
@@ -91,7 +93,8 @@ export function Stage1Page(){
   const current=accounts.find(x=>x.id===selected)||accounts[0];
   async function action(fn:()=>Promise<unknown>,done:string){setBusy(true);setError('');setNotice('');try{await fn();await refresh();setNotice(done);if(current){const x=await get<{orders:typeof orders}>(`/api/v1/stage1/portfolios/${encodeURIComponent(selected)}/orders`);setOrders(x.orders);}}catch(e){setError(String(e));}finally{setBusy(false);}}
   const displayValue=(accounts.reduce((v,a)=>v+Number(a.krw_cash),0));
-  return <div className="s1-shell">
+  if(!advanced)return <Stage1Dashboard onAdvanced={()=>setAdvanced(true)}/>;
+  return <div className="s1-shell"><button type="button" className="s1-outline" onClick={()=>setAdvanced(false)}>← 통합 대시보드로 돌아가기</button>
     <div className="s1-heading"><div><div className="s1-eyebrow">WEALTHY / PAPER INVESTING</div><p className="s1-desc">기본 계좌: 미국 주식 · 한국 주식 · ISA 각 1개. 시작금 400만 원(미국 80% / 국내 10% / ISA 10%), 매월 25일 35만 원을 동일 비율로 자동 가상 입금합니다.</p><h1>가상 투자 워크스페이스</h1><p>실제 금융계좌와 분리된 모의투자 · 서버 실행 중 1시간마다 검토 · 지연 종가 기준</p></div><span className="s1-pill">{fund?.auto_trading_enabled?'● 자동 모의투자 실행 중':'● 모의거래 전용 / 자동 운용 대기'}</span></div>
     {error&&<div className="s1-error" role="alert">{error}</div>}{notice&&<div className="s1-notice" role="status">{notice}</div>}
     <section className="s1-panel">
