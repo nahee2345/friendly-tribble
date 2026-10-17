@@ -78,6 +78,21 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
   },[tab,query,market,kind]);
   const relevantNews=useMemo(()=>detail&&news?news.news.filter(n=>n.symbols.includes(detail.symbol)).slice(0,5):[],[detail,news]);
   const activeQuant=useMemo(()=>detail?quant?.items.find(x=>x.symbol===detail.symbol)??null:null,[detail,quant]);
+  const rankedRecommendations=useMemo(()=>{
+    const items=(hub?.recommendations??[]).slice();
+    if(!quant)return items;
+    const lookup=new Map(quant.items.map(x=>[x.symbol,x]));
+    return items.sort((a,b)=>{
+      const qa=lookup.get(a.symbol),qb=lookup.get(b.symbol);
+      const sa=qa?.score,sb=qb?.score;
+      if(sa!==null&&sa!==undefined&&sb!==null&&sb!==undefined){
+        if(sa!==sb)return sb-sa;
+      }else if(sa!==null&&sa!==undefined)return -1;
+      else if(sb!==null&&sb!==undefined)return 1;
+      const coverage=(qb?.coverage_pct??0)-(qa?.coverage_pct??0);
+      return coverage||b.priority_score-a.priority_score||a.symbol.localeCompare(b.symbol);
+    });
+  },[hub,quant]);
   const slides=detail?[
     {head:'투자 판단 요약',body:<><b>{activeQuant?.recommendation??'정량 평가 조회 중'}</b><p>{detail.name} ({detail.symbol})</p>
       <p>종합점수: {activeQuant?.score??'자료 부족'} · 자료 충족률 {activeQuant?.coverage_pct??'–'}%
@@ -154,7 +169,7 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
         {!news?.risk_suspected.length&&<p>현재 수집 범위에서 보유종목 관련 부정 제목을 확인하지 못했습니다.</p>}
         <small className="wh-caveat">뉴스가 손실을 확정한다는 뜻이 아닙니다. 서버 가동 중 확인 후 알림함에 저장됩니다.</small></section>
       <section className="wh-card wh-recs"><div className="wh-head"><b>자동 투자 검토 종목</b><small>누르면 추천 근거 카드뉴스</small></div><div className="wh-reclist">
-        {(hub?.recommendations??[]).slice(0,5).map(x=>{
+        {rankedRecommendations.slice(0,5).map(x=>{
           const q=quant?.items.find(s=>s.symbol===x.symbol);
           return <button key={x.symbol} onClick={()=>void openRecommendation(x)}><b>{x.symbol}</b><span>{x.name}</span>
             <em>{q?.score!==null&&q?.score!==undefined?q.score+'점 · '+q.coverage_pct+'% 충족':q?'자료 부족 · '+q.coverage_pct+'%':'평가 대기'}</em>
