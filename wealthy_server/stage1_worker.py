@@ -49,7 +49,8 @@ class PaperWorker:
         today = datetime.now(ZoneInfo("Asia/Seoul")).date()
         initialize_paper_accounts(owner, self.ledger, self.portfolios, today=today)
         store_daily_cards_after_16(owner,self.portfolios,self.ledger,
-                                   self.preferences,StrategyPolicy(self.portfolios))
+                                   self.preferences,StrategyPolicy(self.portfolios),
+                                   accounting_engine=self.accounting_engine)
         # Collection failures must not suppress paper risk controls.
         try:
             ensure_seed(self.portfolios)
