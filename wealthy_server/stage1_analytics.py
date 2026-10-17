@@ -54,7 +54,7 @@ def fetch_daily_history(symbol: str, *, today=None, opener=None) -> dict:
                 "as_of": rows[-1][0].isoformat(),
                 "notice": "종가 기반 연구용 자료. 배당·세금·수수료·슬리피지 미반영."}
     except (OSError, ValueError, KeyError, UnicodeError, InvalidOperation,
-            TimeoutError):
+            TimeoutError, csv.Error, TypeError):
         return {"status": "unavailable", "reason": "HISTORY_UNVERIFIED", "symbol": symbol}
 
 
@@ -65,7 +65,13 @@ def _change(before: Decimal, after: Decimal) -> float:
 def research_summary(history: dict, *, fees_bps: int = 0) -> dict:
     if history.get("status") != "ok":
         return {"status": "unavailable", "reason": history.get("reason", "MISSING_HISTORY")}
-    prices = [Decimal(row["close"]) for row in history["prices"]]
+    if (not isinstance(fees_bps,int) or isinstance(fees_bps,bool)
+            or not 0 <= fees_bps <= 1000):
+        return {"status": "unavailable", "reason": "INVALID_FEE_ASSUMPTION"}
+    try:
+        prices = [Decimal(row["close"]) for row in history["prices"]]
+    except (KeyError, TypeError, ValueError, InvalidOperation):
+        return {"status": "unavailable", "reason": "INVALID_HISTORY"}
     if len(prices) < 65 or any(not p.is_finite() or p <= 0 for p in prices):
         return {"status": "unavailable", "reason": "INVALID_HISTORY"}
     closes = [float(p) for p in prices]
