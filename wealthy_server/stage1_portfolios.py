@@ -93,6 +93,48 @@ class Portfolios:
             db.execute('COMMIT')
         return self.list(owner)
 
+    def auto_buy_usd_with_fx(self, owner, symbol, quote, rate, request_id):
+        """Atomically convert virtual KRW and buy one USD share; never strand FX."""
+        from decimal import ROUND_UP, ROUND_DOWN
+        if not valid_key(request_id) or not SYMBOL.fullmatch(symbol):
+            raise ValueError('요청 식별자 오류')
+        if quote.get('symbol') != symbol or quote.get('tradeable') is not True or quote.get('status') != 'ok' or quote.get('currency') != 'USD':
+            raise ValueError('미검증 시세')
+        price = Decimal(str(quote['price']))
+        fx = Decimal(str(rate))
+        if not price.is_finite() or price <= 0 or price.as_tuple().exponent < -4 or not fx.is_finite() or not 100 <= fx <= 10000 or fx.as_tuple().exponent < -4:
+            raise ValueError('가격·환율 형식 오류')
+        with self._db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            self._ensure(db, owner)
+            kind = db.execute("SELECT kind FROM portfolios WHERE owner=? AND id='default'", (owner,)).fetchone()
+            if not kind or kind[0] != 'GENERAL_OVERSEAS':
+                raise ValueError('해외 가상계좌 없음')
+            prior = db.execute("SELECT symbol,side,quantity FROM virtual_orders WHERE owner=? AND portfolio='default' AND request_id=?", (owner,request_id)).fetchone()
+            if prior:
+                if prior != (symbol, 'BUY', 1):
+                    raise ValueError('중복키 충돌')
+                db.execute('COMMIT')
+                return {'status': 'already_executed', 'accounts': self.list(owner)['accounts']}
+            cash_krw,cash_usd,_,_ = self._money(db,owner,'default')
+            gap = max(Decimal('0'), price-cash_usd)
+            amount = 0
+            if gap:
+                # Ensure 2-decimal USD received covers the required share cost.
+                amount = int((gap*fx).to_integral_value(rounding=ROUND_UP))
+                while (Decimal(amount)/fx).quantize(Decimal('0.01'), rounding=ROUND_DOWN) < gap:
+                    amount += 1
+                if Decimal(amount)>cash_krw or amount>10_000_000:
+                    raise ValueError('원화 부족')
+                received=(Decimal(amount)/fx).quantize(Decimal('0.01'),rounding=ROUND_DOWN)
+                db.execute('INSERT INTO stage1_events VALUES (?,?,?,?,?,?,?)',
+                    (owner,request_id+':fx','virtual_fx',-amount,format(received,'f'),format(fx,'f'),datetime.now(timezone.utc).isoformat()))
+            db.execute('INSERT INTO virtual_orders VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+                (owner,'default',request_id,symbol,'BUY',1,format(price,'f'),'USD',
+                quote['source'],quote['as_of'],datetime.now(timezone.utc).isoformat()))
+            db.execute('COMMIT')
+        return {'status': 'executed', 'accounts': self.list(owner)['accounts']}
+
     def orders(self,owner,portfolio):
         with self._db() as db:
             if not db.execute('SELECT 1 FROM portfolios WHERE owner=? AND id=?',(owner,portfolio)).fetchone(): raise ValueError('계좌 없음')
