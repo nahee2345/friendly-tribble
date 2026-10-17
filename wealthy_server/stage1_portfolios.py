@@ -135,10 +135,12 @@ class Portfolios:
             db.execute('COMMIT')
         return {'status': 'executed', 'accounts': self.list(owner)['accounts']}
 
-    def orders(self,owner,portfolio):
+    def orders(self,owner,portfolio,limit=100):
+        if not isinstance(limit,int) or isinstance(limit,bool) or not 1<=limit<=100000:
+            raise ValueError('거래내역 조회 한도 오류')
         with self._db() as db:
             if not db.execute('SELECT 1 FROM portfolios WHERE owner=? AND id=?',(owner,portfolio)).fetchone(): raise ValueError('계좌 없음')
-            rows=db.execute('SELECT request_id,symbol,side,quantity,price,currency,source,as_of,created_at FROM virtual_orders WHERE owner=? AND portfolio=? ORDER BY created_at DESC,request_id DESC LIMIT 100',(owner,portfolio)).fetchall()
+            rows=db.execute('SELECT request_id,symbol,side,quantity,price,currency,source,as_of,created_at FROM virtual_orders WHERE owner=? AND portfolio=? ORDER BY created_at DESC,request_id DESC LIMIT ?',(owner,portfolio,limit)).fetchall()
         return {'orders':[dict(zip(('id','symbol','side','quantity','price','currency','source','as_of','timestamp'),r)) for r in rows]}
 
     def trade(self,owner,portfolio,symbol,side,quantity,request_id,quote):
