@@ -76,3 +76,20 @@ def test_news_impact_does_not_claim_certainty(tmp_path):
     assert response["impacts"][0]["symbols"] == ["360750"]
     assert "검토" in response["impacts"][0]["outcome"]
     assert response["impacts"][0]["action"].startswith("확인 필요")
+
+def test_domestic_target_zero_does_not_buy(tmp_path):
+    from wealthy_server.stage1_domestic import paper_run_domestic
+    p,prefs,store=setup(tmp_path)
+    prefs.save("owner",100,70)
+    outcome=paper_run_domestic("owner",p,today=date(2026,10,17),
+                               quote_provider=quote,preference=prefs.get("owner"))
+    assert outcome["status"]=="skipped"
+    assert not p.orders("owner","kr-base")["orders"]
+
+
+def test_strategy_weights_drive_heuristic_reserve():
+    from wealthy_server.stage1_decisions import reserve_ratio
+    low={"index":100,"momentum":0}
+    high={"index":0,"momentum":100}
+    assert reserve_ratio(low) < reserve_ratio(high)
+    assert 15<=reserve_ratio(high)<=40
