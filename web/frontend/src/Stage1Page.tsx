@@ -33,7 +33,7 @@ export function Stage1Page(){
     try{
       const result=await post<{status:string;reason?:string;executed:{symbol:string;side:string}[];skipped:{symbol:string;reason?:string}[]}>('/api/v1/stage1/portfolio-plan/run',{});
       setNotice(result.executed.length?('검증 완료된 가상거래 '+result.executed.length+'건 기록: '+result.executed.map(x=>x.side+' '+x.symbol).join(', ')):
-        ('신규 가상체결 없음: '+(result.reason??result.skipped.map(x=>x.symbol+' '+(x.reason??'')).join(' · ')||result.status)));
+        ('신규 가상체결 없음: '+(result.reason??(result.skipped.map(x=>x.symbol+' '+(x.reason??'')).join(' · ')||result.status))));
       await refresh();await refreshStage4();
     }catch(e){setError(String(e));}finally{setBusy(false);}
   }
