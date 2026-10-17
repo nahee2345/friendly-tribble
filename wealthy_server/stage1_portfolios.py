@@ -115,7 +115,7 @@ class Portfolios:
                 if prior != (symbol, 'BUY', 1):
                     raise ValueError('중복키 충돌')
                 db.execute('COMMIT')
-                return {'status': 'already_executed', 'accounts': self.list(owner)['accounts']}
+                return {'status': 'already_executed', 'accounts': []}
             cash_krw,cash_usd,_,_ = self._money(db,owner,'default')
             gap = max(Decimal('0'), price-cash_usd)
             amount = 0
