@@ -36,3 +36,14 @@ def test_history_missing_or_corrupt_returns_unavailable():
 def test_history_invalid_symbols_are_not_fetched():
     assert fetch_daily_history("../../etc/passwd")["status"] == "unavailable"
     assert fetch_daily_history("005930")["status"] == "unavailable"
+
+def test_malformed_price_text_is_not_recommended():
+    bad = make_history()
+    bad["prices"][3]["close"] = "unparseable"
+    result = research_summary(bad)
+    assert result["status"] == "unavailable"
+
+
+def test_invalid_fee_rejected():
+    result = research_summary(make_history(), fees_bps=-1)
+    assert result["status"] == "unavailable"
