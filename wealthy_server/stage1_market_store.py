@@ -255,9 +255,19 @@ def validated_snapshot(kind, symbol, provider, source_url, payload, *, now=None)
             if (not numerical.is_finite() or abs(numerical)>Decimal("1000000000000000")
                     or numerical.as_tuple().exponent < -6):
                 raise ValueError("invalid SEC magnitude")
+            start=item.get("period_start")
+            if start is not None:
+                start=_date(start,now,max_age=2500)
+                if start>period:raise ValueError("SEC period start after end")
+            form=item.get("form","")
+            if form not in ("10-K","10-K/A","10-Q","10-Q/A"):
+                raise ValueError("unverified SEC report type")
+            accession=item.get("accession","")
+            if not isinstance(accession,str) or len(accession)>36:
+                raise ValueError("invalid SEC accession")
             output.append({"tag":name,"value":format(numerical,"f"),
                 "unit":item["unit"],"filed":filed,"period_end":period,
-                "form":item.get("form",""),"accession":item.get("accession","")})
+                "period_start":start,"form":form,"accession":accession})
         as_of=max(x["filed"] for x in output)
         normalized={"symbol":symbol,"as_of":as_of,"facts":output,
                     "source_kind":"SEC_XBRL_FACTS","ratios_computed":False}
