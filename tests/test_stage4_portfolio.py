@@ -277,3 +277,103 @@ def test_external_paper_emergency_pause_at_execution_boundary(tmp_path):
     result=engine.run("owner",now=NOW)
     assert not result["executed"]
     assert not p.orders("owner","default")["orders"]
+
+
+def test_legacy_manual_buy_consume_same_day_portfolio_spending_budget(tmp_path):
+    ledger,p,prefs,policy,cache,engine=setup(tmp_path)
+    make_symbol(cache,"VOO",80)
+    add(cache,"PRICE","005930",quote("005930",150000))
+    p.trade("owner","kr-base","005930","BUY",1,"manual-order-001",
+            quote("005930",150000))
+    # Synthetic test timeline: prior manual transaction happened on the
+    # same model date, even if the test runner system clock differs.
+    with p._db() as db:
+        db.execute("UPDATE virtual_orders SET created_at=? WHERE owner=? AND request_id=?",
+                   (NOW.isoformat(),"owner","manual-order-001"))
+    plan=engine.preview("owner",now=NOW)
+    assert plan["status"]=="ready"
+    assert any(x["side"]=="BUY" for x in plan["proposed_orders"])
+    set_paused("owner",p,False,"test")
+    result=engine.run("owner",now=NOW)
+    assert not result["executed"]
+    assert any(x["reason"]=="DAILY_CAP_EXCEEDED" for x in result["skipped"])
+    assert len(p.orders("owner","default")["orders"])==0
+
+
+def test_policy_change_between_plan_and_fresh_quote_blocks_fill(tmp_path):
+    ledger,p,prefs,policy,cache,engine=setup(tmp_path)
+    make_symbol(cache,"VOO",80)
+    set_paused("owner",p,False,"test")
+    def changed_policy(symbol):
+        prefs.save("owner",0,100)
+        return quote(symbol,80)
+    engine.quote_provider=changed_policy
+    result=engine.run("owner",now=NOW)
+    assert result["executed"]==[]
+    assert result["skipped"][0]["reason"]=="POLICY_CHANGED_AFTER_PLAN"
+    assert p.orders("owner","default")["orders"]==[]
+
+
+def test_weekend_blocks_execution_even_if_friday_reference_is_fresh(tmp_path):
+    ledger,p,prefs,policy,cache,engine=setup(tmp_path)
+    make_symbol(cache,"VOO",80)
+    set_paused("owner",p,False,"test")
+    engine.quote_provider=lambda symbol:(_ for _ in ()).throw(
+        AssertionError("not allowed to fetch a weekend execution quote"))
+    result=engine.run("owner",now=datetime(2026,10,17,7,0,tzinfo=timezone.utc))
+    assert result["status"]=="market_closed"
+    assert not result["executed"]
+    assert p.orders("owner","default")["orders"]==[]
+
+
+def test_fresh_fx_deviation_blocks_usd_buy(tmp_path):
+    ledger,p,prefs,policy,cache,engine=setup(tmp_path)
+    make_symbol(cache,"VOO",80)
+    set_paused("owner",p,False,"test")
+    engine.fx_provider=lambda:{"status":"ok","executable":False,
+                                "usd_krw":"1550","as_of":CLOSE}
+    result=engine.run("owner",now=NOW)
+    assert not result["executed"]
+    assert result["skipped"][0]["reason"]=="FX_MOVED_MORE_THAN_3_PERCENT"
+    assert p.orders("owner","default")["orders"]==[]
+
+
+def test_concurrent_external_buys_rechecked_against_symbol_concentration(tmp_path):
+    ledger,p,prefs,policy,cache,engine=setup(tmp_path)
+    make_symbol(cache,"VOO",80)
+    set_paused("owner",p,False,"test")
+    once=[]
+    def concurrent_manual_fills(symbol):
+        if not once:
+            once.append(True)
+            # New buys enter the existing paper ledger between planning and
+            # the Stage4 claim. They cannot be ignored by concentration rules.
+            for i in range(7):
+                p.auto_buy_usd_with_fx("owner","VOO",quote("VOO",80),"1400",
+                                       f"outside-buy-{i:03}")
+        return quote(symbol,80)
+    engine.quote_provider=concurrent_manual_fills
+    result=engine.run("owner",now=NOW)
+    assert not result["executed"]
+    assert result["skipped"][0]["reason"]=="CONCENTRATION_CAP_CHANGED"
+    assert len(p.orders("owner","default")["orders"])==7
+
+
+def test_claimed_state_reports_manual_reconciliation_required(tmp_path):
+    ledger,p,prefs,policy,cache,engine=setup(tmp_path)
+    make_symbol(cache,"VOO",80)
+    plan=engine.preview("owner",now=NOW)
+    item=plan["proposed_orders"][0]
+    import wealthy_server.stage4_portfolio as module
+    with p._db() as db:
+        db.execute("BEGIN IMMEDIATE");module._schema(db)
+        db.execute("""INSERT INTO stage4_execution_claims VALUES
+            (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            ("owner",item["request_id"],plan["plan_hash"],item["account"],item["symbol"],
+             item["side"],item["quantity"],item["notional_krw"],
+             "CLAIMED","CRASH_SIMULATION",NOW.isoformat(),NOW.isoformat()))
+        db.execute("COMMIT")
+    report=recorded_claims("owner",p)["items"][0]
+    assert report["needs_manual_reconciliation"] is True
+    assert report["ledger_order_verified"] is False
+    assert not p.orders("owner","default")["orders"]
