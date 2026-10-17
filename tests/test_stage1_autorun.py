@@ -39,7 +39,7 @@ def test_fail_closed_on_missing_rate(tmp_path):
 def test_user_allocation_can_disable_one_click(tmp_path):
     path = tmp_path / 'paper.sqlite3'
     prefs = PreferenceStore(path)
-    prefs.save('x', 20, 20)
+    prefs.save('x', 0, 20)
     result = paper_run_once('x', Stage1Ledger(path), Portfolios(path), prefs,
                             today=date(2026, 10, 17),
                             fx_provider=lambda: (_ for _ in ()).throw(
