@@ -29,6 +29,10 @@ def paper_run_domestic(owner, portfolios, *, today=None, quote_provider=verified
         key = f'auto:{day:%Y%m%d}:{account_id}'
         # A stable idempotency key prevents more than one decision/day/account.
         orders = portfolios.orders(owner, account_id)['orders']
+        if any(o['side']=='SELL' and o['id'].startswith(f'exit:{day:%Y%m%d}:')
+               for o in orders):
+            results.append({'account':account_id,'status':'skipped','reason':'금일 매도 후 재매수 제한'})
+            continue
         if any(item['id'] == key for item in orders):
             results.append({'account':account_id, 'status':'already_executed','symbol':symbol})
             continue
