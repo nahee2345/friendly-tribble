@@ -46,8 +46,22 @@ class StrategyPolicy:
         weights = dict(rows) if rows else DEFAULT_WEIGHTS.copy()
         if set(weights) != set(DEFAULT_WEIGHTS) or sum(weights.values()) != 100:
             raise ValueError("전략 비중 원장의 무결성 오류")
+        last_updated = None
+        with self.portfolios._db() as db:
+            self._schema(db)
+            last = db.execute("SELECT MAX(updated_at) FROM stage1_strategy_weights WHERE owner=?",
+                              (owner,)).fetchone()
+            last_updated = last[0] if last else None
+        next_change = None
+        locked = False
+        if last_updated:
+            applied = datetime.fromisoformat(last_updated)
+            deadline = applied + timedelta(days=14)
+            locked = datetime.now(timezone.utc) < deadline
+            next_change = deadline.isoformat()
         return {"weights": weights, "labels": dict(STRATEGIES),
-                "notice": "설정은 다음 자동 검토에 적용. 기존 가상 거래는 변경하지 않습니다."}
+                "applied_at":last_updated,"next_change_at":next_change,
+                "locked":locked,"notice":"적용 후 14일 변경 제한. 기존 가상 거래는 변경하지 않습니다."}
 
     def save(self, owner, weights):
         if (not isinstance(weights, dict) or set(weights) != set(DEFAULT_WEIGHTS)
