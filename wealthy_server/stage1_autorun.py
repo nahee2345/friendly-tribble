@@ -4,7 +4,8 @@ No real broker access, predictive AI, or unattended scheduler.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from decimal import Decimal, ROUND_UP
 
 from .stage1_discovery import CANDIDATES
@@ -14,7 +15,7 @@ from .stage1_research import current_fx
 
 def paper_run_once(owner, ledger, portfolios, preferences, *, today=None,
                    quote_provider=verified_quote, fx_provider=current_fx):
-    day = today or datetime.now(timezone.utc).date()
+    day = today or datetime.now(ZoneInfo('Asia/Seoul')).date()
     prefs = preferences.get(owner)
     if prefs['us_weight'] < 50 or prefs['etf_weight'] < 50:
         return {'status': 'skipped', 'traded': False,
