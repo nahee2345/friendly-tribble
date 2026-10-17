@@ -378,11 +378,14 @@ def create_app(
         from .stage1_collectors import Collector
         stage2_store = MarketStore.for_portfolios(portfolio_store)
         stage2_collector = Collector(stage2_store)
+        from .stage4_portfolio import PortfolioEngine
+        stage4_engine = PortfolioEngine(portfolio_store, preference_store, stage2_store)
         from .stage1_bootstrap import initialize_paper_accounts
         if market_information_auto_start:
             from .stage1_worker import PaperWorker
             paper_worker = PaperWorker(db, stage1, portfolio_store, preference_store,
-                                       market_collector=stage2_collector)
+                                       market_collector=stage2_collector,
+                                       portfolio_engine=stage4_engine)
             app.state.paper_worker = paper_worker
             app.router.add_event_handler("startup", paper_worker.start)
             app.router.add_event_handler("shutdown", paper_worker.stop)
@@ -526,6 +529,29 @@ def create_app(
         class Stage2ReferenceRefresh(BaseModel):
             kind: str
             symbol: str
+
+        @app.get("/api/v1/stage1/portfolio-plan")
+        def stage4_plan(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
+            initialize_paper_accounts(actor.owner_id,stage1,portfolio_store)
+            try:
+                return stage4_engine.preview(actor.owner_id)
+            except (ValueError,KeyError,ArithmeticError):
+                raise _error(422,"PAPER_PLAN_INCOMPLETE",
+                             "자료·계좌·투자원장 일부를 확인할 수 없어 안전한 계획을 만들지 못했습니다.") from None
+
+        @app.get("/api/v1/stage1/portfolio-plan/history")
+        def stage4_plan_history(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
+            from .stage4_portfolio import recorded_claims
+            return recorded_claims(actor.owner_id,portfolio_store)
+
+        @app.post("/api/v1/stage1/portfolio-plan/run")
+        def stage4_plan_run(actor: Actor = Depends(mutation_actor)) -> dict[str, Any]:
+            initialize_paper_accounts(actor.owner_id,stage1,portfolio_store)
+            try:
+                return stage4_engine.run(actor.owner_id)
+            except (ValueError,KeyError,ArithmeticError):
+                raise _error(422,"PAPER_PLAN_EXECUTION_REJECTED",
+                             "가상주문 통합 위험·잔액 검증에서 실행이 거부되었습니다.") from None
 
         @app.get("/api/v1/stage1/quantitative")
         def stage3_quantitative(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
@@ -777,15 +803,14 @@ def create_app(
 
         @app.post("/api/v1/stage1/auto-run")
         def stage1_auto_run(actor: Actor = Depends(mutation_actor)) -> dict[str, Any]:
-            """A single explicitly requested simulated ETF investment; no brokerage."""
-            from .stage1_controls import status
-            if status(actor.owner_id, portfolio_store)["paused"]:
-                return {"status":"paused","traded":False,"reason":"가상거래 긴급 중지 중"}
-            from .stage1_autorun import paper_run_once
+            """Legacy one-click route now shares Stage4 portfolio-wide limits."""
+            initialize_paper_accounts(actor.owner_id,stage1,portfolio_store)
             try:
-                return paper_run_once(actor.owner_id, stage1, portfolio_store, preference_store)
-            except (ValueError, KeyError, ArithmeticError):
-                raise _error(400, "PAPER_AUTO_REJECTED", "가상 자동주문 검증에 실패했습니다.") from None
+                result=stage4_engine.run(actor.owner_id)
+                result["traded"]=bool(result.get("executed"))
+                return result
+            except (ValueError,KeyError,ArithmeticError):
+                raise _error(400,"PAPER_AUTO_REJECTED","통합 가상거래 위험검증을 통과하지 못했습니다.") from None
 
         @app.get("/api/v1/stage1/seven-cards/history")
         def stage1_seven_cards_history(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
