@@ -305,3 +305,82 @@ def test_invalid_simulated_sell_inventory_fails_closed(tmp_path):
              "fixture",START.date().isoformat(),START.isoformat()))
     with pytest.raises(ValueError,match="negative historic inventory"):
         engine.report("alice",now=NOW)
+
+
+def test_mutated_daily_nav_is_detected_and_twr_not_claimed(tmp_path):
+    ledger,p,cache,engine=environment(tmp_path)
+    engine.capture_daily_nav("alice",now=NOW)
+    engine.capture_daily_nav("alice",now=NOW+timedelta(days=1))
+    with p._db() as db:
+        db.execute("UPDATE stage5_nav_snapshots SET nav_krw='999999999' "
+                   "WHERE owner='alice' AND as_of_day=?",
+                   (NOW.date().isoformat(),))
+    report=engine.report("alice",now=NOW+timedelta(days=1))
+    assert report["valuation_complete"]
+    assert report["twr"]["status"]=="unavailable"
+    assert report["twr"]["reason"]=="NAV_SNAPSHOT_INTEGRITY_FAILED"
+    assert report["nav_history"]==[]
+
+
+def test_concurrent_cash_event_invalidates_daily_nav_capture(tmp_path):
+    ledger,p,cache,engine=environment(tmp_path)
+    original=engine.report
+    def changed_after_report(owner,*,now=None):
+        observed=original(owner,now=now)
+        with p._db() as db:
+            db.execute("""INSERT INTO stage1_events
+               (owner,event_key,kind,amount_krw,amount_usd,rate,created_utc)
+               VALUES (?,?,?,?,?,?,?)""",
+               (owner,"concurrent-deposit-01","deposit",20000,"0",None,
+                START.isoformat()))
+        return observed
+    engine.report=changed_after_report
+    capture=engine.capture_daily_nav("alice",now=NOW)
+    assert capture["status"]=="ledger_changed" and not capture["saved"]
+    with p._db() as db:
+        count=db.execute("SELECT COUNT(*) FROM stage5_nav_snapshots WHERE owner='alice'").fetchone()[0]
+    assert count==0
+
+
+def test_daily_nav_chart_uses_real_dated_funding_not_reversed_cash_flow(tmp_path):
+    ledger,p,cache,engine=environment(tmp_path)
+    a=NOW
+    assert engine.capture_daily_nav("alice",now=a)["status"]=="saved"
+    with p._db() as db:
+        db.execute("""INSERT INTO stage1_events VALUES (?,?,?,?,?,?,?)""",
+                   ("alice","second-deposit-2026","deposit",50000,"0",None,
+                    (a+timedelta(hours=6)).isoformat()))
+    assert engine.capture_daily_nav("alice",now=a+timedelta(days=1))["status"]=="saved"
+    report=engine.report("alice",now=a+timedelta(days=1))
+    assert len(report["nav_history"])==2
+    assert report["nav_history"][0]["contributed_krw"]==4_000_000
+    assert report["nav_history"][1]["contributed_krw"]==4_050_000
+    assert report["twr"]["status"]=="incomplete"
+    assert report["gross_change_after_contributions_krw"]=="0"
+
+
+def test_daily_report_card_uses_verified_stage5_gross_only_not_settled_dividend(tmp_path):
+    from wealthy_server.stage1_daily_cards import generate_cards
+    from wealthy_server.stage1_discovery import PreferenceStore
+    from wealthy_server.stage1_strategy_policy import StrategyPolicy
+    ledger,p,cache,engine=environment(tmp_path)
+    report=generate_cards("alice",p,ledger,PreferenceStore(p.path),StrategyPolicy(p),
+                          today=START.date(),accounting_engine=engine)
+    assert len(report["cards"])==7
+    second=report["cards"][1]
+    assert second["status"].startswith("검증된 총평가")
+    assert second["data"]["valuation_krw"]=="4000000"
+    assert report["cards"][3]["data"]["verified_dividend_krw"] is None
+    assert "지급 미검증" in report["cards"][3]["status"]
+
+
+def test_owner_isolation_rejects_other_owner_and_never_moves_cash(tmp_path):
+    ledger,p,cache,engine=environment(tmp_path)
+    market(cache,prices={"069500":"15000"})
+    p.trade("alice","kr-base","069500","BUY",1,"alice-0001",quote("069500",10000))
+    before=p.list("alice")["accounts"]
+    other=engine.report("unknown-user",now=NOW)
+    assert not any(x["symbol"]=="069500" for x in other["positions"])
+    assert other["market_valuation_krw"] is None or Decimal(other["market_valuation_krw"])==0
+    assert engine.report("alice",now=NOW)["valuation_complete"]
+    assert p.list("alice")["accounts"]==before
