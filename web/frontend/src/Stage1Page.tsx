@@ -31,8 +31,8 @@ export function Stage1Page(){
   type Impact={outcome:string;symbols:string[];confidence:string;reason:string;title:string;original:string;url:string;published:string;action:string};
   const [impactReport,setImpactReport]=useState<{summary:{headline_matches:number;portfolio_action:string;interpretation:string;unavailable_feeds:string[]};impacts:Impact[]}|null>(null);
   const [decisionBusy,setDecisionBusy]=useState(false);
-  async function refreshDecisions(){setDecisionBusy(true);try{setDecisionReport(await get('/api/v1/stage1/decisions'));}catch(e){setError(String(e));}finally{setDecisionBusy(false);}}
-  async function refreshImpacts(){try{setImpactReport(await get('/api/v1/stage1/news-impact'));}catch(e){setError(String(e));}}
+  async function refreshDecisions(){setDecisionBusy(true);try{setDecisionReport(await get<NonNullable<typeof decisionReport>>('/api/v1/stage1/decisions'));}catch(e){setError(String(e));}finally{setDecisionBusy(false);}}
+  async function refreshImpacts(){try{setImpactReport(await get<NonNullable<typeof impactReport>>('/api/v1/stage1/news-impact'));}catch(e){setError(String(e));}}
   async function saveStrategyWeights(){await action(()=>post('/api/v1/stage1/strategy-weights',{weights:strategyWeights}),'전략별 비중을 저장했습니다.');void refreshDecisions();}
 
   const [dailyReports,setDailyReports]=useState<{date:string;checked_at:string;us:{status:string;symbol?:string;reason?:string};domestic:{account:string;status:string;symbol?:string;reason?:string}[];exits:{account:string;symbol:string;status:string}[]}[]>([]);
