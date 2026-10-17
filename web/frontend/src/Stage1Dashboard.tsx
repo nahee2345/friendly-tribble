@@ -16,6 +16,8 @@ type Factor={status:'scored'|'unavailable';score:number|null;why:string[];risks:
 type SourceEvidence={kind:string;provider:string;source_url:string;as_of:string;sha256:string;verified_utc:string};
 type QuantAssessment={symbol:string;status:string;recommendation:string;score:number|null;partial_score:number|null;coverage_pct:number;strategies:Record<string,Factor>;strategies_scored:string[];positive_reasons:string[];risk_reasons:string[];unknown_reasons:string[];source_evidence:SourceEvidence[];no_orders:boolean;paper_order_eligible:boolean};
 type QuantBatch={status:string;items:QuantAssessment[];weights:Record<string,number>;evaluated:number;ready:number;scoring_basis:string};
+type PaperPlan={status:string;reason:string;for_date?:string;portfolio_value_krw:string|null;cash_krw_equivalent:string|null;reserve_percent?:string;daily_spend_cap_krw:string|null;allocation:Record<string,{target_pct:string;held_krw:string;drift_krw:string}>;proposed_orders:{request_id:string;account:string;symbol:string;side:string;quantity:number;notional_krw:string;strategy_score:number|null;coverage_pct:number;reason:string}[];review:{symbol:string;account:string;reason:string;approval_required?:boolean}[];data_errors:string[];trade_enabled:boolean;quant_ready:number;quant_evaluated:number;rules:string[]};
+
 const strategyLabels:Record<string,string>={index:'장기지수',value:'가치',quality_growth:'우량성장',growth:'성장',high_dividend:'고배당',dividend_growth:'배당성장',momentum:'모멘텀',asset_allocation:'자산배분'};
 type ReferenceHealth={current_references:Record<string,number>;recent_attempts:{kind:string;symbol:string;provider:string;checked_utc:string;status:string;error_code:string|null;retry_after_utc:string}[];paper_order_eligible:boolean;notice:string;sec_contact_configured:boolean};
 const fmt=(x:string|number|null|undefined,d=0)=>x===null||x===undefined?'자료 없음':Number(x).toLocaleString('ko-KR',{maximumFractionDigits:d});
@@ -55,15 +57,19 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
   const [riskUnread,setRiskUnread]=useState(0);
   const [referenceHealth,setReferenceHealth]=useState<ReferenceHealth|null>(null);
   const [quant,setQuant]=useState<QuantBatch|null>(null);
+  const [plan,setPlan]=useState<PaperPlan|null>(null);
+  const [showPlan,setShowPlan]=useState(false);
   const [selectedAssessment,setSelectedAssessment]=useState<QuantAssessment|null>(null);
   const [showReferences,setShowReferences]=useState(false);
   async function loadHome(){
     setBusy(true);setError('');
     const results=await Promise.allSettled([read<Hub>('/api/v1/stage1/hub'),read<NewsReport>('/api/v1/stage1/news-30d'),
-      read<QuantBatch>('/api/v1/stage1/quantitative')]);
+      read<QuantBatch>('/api/v1/stage1/quantitative'),
+      read<PaperPlan>('/api/v1/stage1/portfolio-plan')]);
     if(results[0].status==='fulfilled')setHub(results[0].value);else setError('시장·자산 평가를 확인하지 못했습니다. 서버와 가격 공급원을 확인하세요.');
     if(results[1].status==='fulfilled')setNews(results[1].value);
     if(results[2].status==='fulfilled')setQuant(results[2].value);else setQuant(null);
+    if(results[3].status==='fulfilled')setPlan(results[3].value);else setPlan(null);
     const inbox=await read<{items:{event_id:string;read_at:string|null}[]}>('/api/v1/stage1/inbox').catch(()=>null);
     if(inbox)setRiskUnread(inbox.items.filter(x=>x.event_id.startsWith('risk:')&&!x.read_at).length);
     const reference=await read<ReferenceHealth>('/api/v1/stage1/reference/health').catch(()=>null);
@@ -168,7 +174,12 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
         {(news?.risk_suspected??[]).slice(0,3).map((n,i)=><button className="wh-riskrow" key={i} onClick={()=>setSelectedRisk(n)}><b>{n.symbols.join(', ')}</b> {n.title}</button>)}
         {!news?.risk_suspected.length&&<p>현재 수집 범위에서 보유종목 관련 부정 제목을 확인하지 못했습니다.</p>}
         <small className="wh-caveat">뉴스가 손실을 확정한다는 뜻이 아닙니다. 서버 가동 중 확인 후 알림함에 저장됩니다.</small></section>
-      <section className="wh-card wh-recs"><div className="wh-head"><b>자동 투자 검토 종목</b><small>누르면 추천 근거 카드뉴스</small></div><div className="wh-reclist">
+      <section className="wh-card wh-recs"><div className="wh-head"><b>정량 투자 검토 종목</b>
+        <button className="wh-plan-trigger" onClick={()=>setShowPlan(true)}
+          title="자산 전체 목표비중·투자계획·검증 근거 보기">
+          전체 비중 계획 {plan?.status==='ready'?(plan?.proposed_orders.length??0)+'건 검토':'자료 확인 필요'} ›
+        </button>
+      </div><div className="wh-reclist">
         {rankedRecommendations.slice(0,5).map(x=>{
           const q=quant?.items.find(s=>s.symbol===x.symbol);
           return <button key={x.symbol} onClick={()=>void openRecommendation(x)}><b>{x.symbol}</b><span>{x.name}</span>
@@ -195,6 +206,30 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
          <p>종목 검색은 자동매수 승인과 다릅니다. 검증되지 않은 데이터는 체결에 사용하지 않습니다.</p></>:<p>왼쪽에서 종목을 선택해 주세요.</p>}
          <small>{catalog?.notice??'종목목록 범위 확인 중'}</small></div></div>
       </main>}
+    {showPlan&&<div className="wh-overlay" onClick={()=>setShowPlan(false)}>
+      <div className="wh-modal" role="dialog" aria-modal="true" aria-label="통합 모의투자 계획과 시장별 목표 비중" onClick={e=>e.stopPropagation()}>
+        <div className="wh-head"><b>4단계 통합 자산·투자계획</b><button onClick={()=>setShowPlan(false)} aria-label="닫기">✕</button></div>
+        <div className="wh-slide">
+          <p><b>자산 평가: {plan?.portfolio_value_krw?'₩'+fmt(plan.portfolio_value_krw):'미확정'}</b>
+          · 8전략 분석 가능 {plan?.quant_ready??0}/{plan?.quant_evaluated??0}종</p>
+          <p>매수 검토 한도: {plan?.daily_spend_cap_krw?'₩'+fmt(plan.daily_spend_cap_krw):'미확인'}
+          · {plan?.trade_enabled?'모의운용 허용':'가상 자동매매 중지'}</p>
+          {plan?.data_errors.length?plan.data_errors.map((v,i)=><p key={'err'+i}><b>검증 보류:</b> {v}</p>):null}
+          <h4>시장·상품군 목표와 실제 보유</h4>
+          {Object.entries(plan?.allocation??{}).map(([group,x])=><p key={group}>
+            <b>{group}</b> 목표 {x.target_pct}% · 보유 ₩{fmt(x.held_krw)} · 부족/초과 ₩{fmt(x.drift_krw)}</p>)}
+          <h4>검토 중인 가상 주문</h4>
+          {plan?.proposed_orders.length?plan.proposed_orders.map(x=><p key={x.request_id}>
+            <b>{x.side} {x.symbol} {x.quantity}주</b> · {x.account} · ₩{fmt(x.notional_krw)}
+            <small> · 정량 {x.strategy_score??'미평가'}점 / 충족률 {x.coverage_pct}%</small>
+            <text size="sm">{x.reason}</text>
+          </p>):<p>실행 가능한 계획이 없습니다. 데이터 부족·현금 유보 또는 목표 비중 충족일 수 있습니다.</p>}
+          <h4>보유종목 위험 재검토</h4>
+          {plan?.review.length?plan.review.slice(0,10).map((x,i)=><p key={i}>{x.symbol} · {x.reason}{x.approval_required?' (별도 승인 필수)':''}</p>):<p>자료 범위에서 추가 매도 재검토 사항 없음</p>}
+          <small>모든 주문은 가상 원장에서만 발생하며, 실제 시세 재검증 후 상세 설정 화면에서 실행됩니다.</small>
+        </div>
+      </div>
+    </div>}
     {showReferences&&<div className="wh-overlay" onClick={()=>setShowReferences(false)}>
       <div className="wh-modal" role="dialog" aria-modal="true" aria-label="공개 금융자료 품질 및 수집 상태" onClick={e=>e.stopPropagation()}>
         <div className="wh-head"><b>시장 자료 검증 상태</b><button onClick={()=>setShowReferences(false)} aria-label="닫기">✕</button></div>
