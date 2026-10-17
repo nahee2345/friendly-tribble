@@ -186,7 +186,8 @@ class PortfolioEngine:
         symbols=list(dict.fromkeys(list(CANDIDATES)+[x["symbol"] for x in held]))
         if len(symbols)>24:
             return self._blocked(now,prefs,weights,"종목 수집 상한 초과")
-        pairs=[("FX","USD/KRW")]+[("PRICE",s) for s in symbols]
+        pairs=[("FX","USD/KRW")]+[("PRICE",s) for s in symbols]+[
+            ("HISTORY",s) for s in symbols]
         observations=self.market_store.latest_many(pairs,now=now)
         rate=_fx(observations[("FX","USD/KRW")],now)
         missing=[]
@@ -200,6 +201,17 @@ class PortfolioEngine:
             cash_krw+=_decimal(account["krw_cash"])
             if rate is not None:
                 cash_krw+=_decimal(account["usd_cash"])*rate
+        # A market quote and an independent historical latest close should
+        # not materially disagree. Research scores remain visible, but BUY
+        # is held for data reconciliation if two sources diverge.
+        coherence={}
+        for symbol in symbols:
+            hist=observations.get(("HISTORY",symbol),{})
+            last=(hist.get("data",{}).get("prices") or [{}])[-1]
+            historic=_decimal(last["close"]) if isinstance(last,dict) and last.get("close") is not None else None
+            spot=prices.get(symbol)
+            coherence[symbol]=(historic is None or spot is None or historic<=0
+                or abs(spot/historic-1)<=Decimal("0.10"))
         values={}
         sleeve_held={(market,kind):Decimal(0)
                      for market in ("US","KR") for kind in ("ETF","STOCK")}
@@ -324,7 +336,7 @@ class PortfolioEngine:
             for result in acceptable:
                 symbol=result["symbol"]
                 price=prices.get(symbol)
-                if price is None:continue
+                if price is None or not coherence.get(symbol,False):continue
                 if market=="US" and rate is None:continue
                 converted=price*(rate if market=="US" else Decimal(1))
                 if converted<=0:continue
@@ -379,7 +391,8 @@ class PortfolioEngine:
                 "proposed_orders":orders,"review":watches,
                 "data_errors":missing,"quant_ready":sum(x["status"]=="research_ready" for x in assessed),
                 "quant_evaluated":len(assessed),
-                "trade_enabled":not pause_status(owner,self.portfolios)["paused"],
+                "trade_enabled":(not pause_status(owner,self.portfolios)["paused"]
+                                 and day.weekday()<5),
                 "rules":["데이터 캐시는 거래 체결 가격이 아닙니다.",
                          "매수 체결 직전 새 공식/공개 지연종가·환율을 재검증합니다.",
                          "30만원 이상 자동 체결 금지, 승인 생략 금지.",
@@ -411,6 +424,9 @@ class PortfolioEngine:
         balance, paused-state and account-instrument checks.
         """
         now=now or datetime.now(timezone.utc)
+        if _signed_day(now).weekday()>=5:
+            return {"status":"market_closed","reason":"한국시간 주말에는 자동 모의거래를 기록하지 않습니다.",
+                    "executed":[],"skipped":[],"simulated_only":True}
         if pause_status(owner,self.portfolios)["paused"]:
             return {"status":"paused","reason":"가상매매 중지 상태",
                     "executed":[],"skipped":[],"simulated_only":True}
