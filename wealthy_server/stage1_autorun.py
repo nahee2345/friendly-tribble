@@ -14,7 +14,8 @@ from .stage1_research import current_fx
 
 
 def paper_run_once(owner, ledger, portfolios, preferences, *, today=None,
-                   quote_provider=verified_quote, fx_provider=current_fx):
+                   quote_provider=verified_quote, fx_provider=current_fx,
+                   strategy_weights=None):
     day = today or datetime.now(ZoneInfo('Asia/Seoul')).date()
     prefs = preferences.get(owner)
     if prefs['us_weight'] < 50 or prefs['etf_weight'] < 50:
@@ -49,7 +50,24 @@ def paper_run_once(owner, ledger, portfolios, preferences, *, today=None,
     symbol = None
     price = None
     evidence = None
-    for ticker, name, kind, thesis, issuer in CANDIDATES:
+    # Selection uses policy category weights where available, not an assumed
+    # forecast of which ETF will make the most money. Invalid policy fails closed.
+    ordered_candidates = list(CANDIDATES)
+    if strategy_weights is not None:
+        from .stage1_strategy_policy import DEFAULT_WEIGHTS
+        if (not isinstance(strategy_weights, dict) or
+            set(strategy_weights) != set(DEFAULT_WEIGHTS) or
+            any(type(v) is not int or not 0<=v<=100 for v in strategy_weights.values()) or
+            sum(strategy_weights.values()) != 100):
+            return {'status':'skipped','traded':False,'reason':'전략 비중의 무결성 검증 실패'}
+        tags = {
+            'VOO':('index','asset_allocation'), 'VTI':('index','asset_allocation'),
+            'QQQM':('growth','momentum'), 'SCHD':('high_dividend','dividend_growth'),
+            'VXUS':('asset_allocation',)
+        }
+        ordered_candidates.sort(key=lambda c:
+            -sum(strategy_weights.get(t,0) for t in tags.get(c[0],())))
+    for ticker, name, kind, thesis, issuer in ordered_candidates:
         if kind != 'ETF':
             continue
         quote = quote_provider(ticker)
