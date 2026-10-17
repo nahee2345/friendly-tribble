@@ -441,6 +441,10 @@ class AccountingEngine:
                 native_totals[lot["currency"]]["realized"]+=lot["realized_native"]
                 if lot["quantity"]<0:raise ValueError("negative inventory")
                 if not lot["quantity"]:continue
+                # Corporate-action dividend entitlement evidence should not
+                # disappear when a separate price feed is unavailable.
+                potential_dividends+=_samples(account_orders,
+                    observed.get(("DIVIDENDS",symbol)),now)
                 current=_close(observed.get(("PRICE",symbol)),"PRICE",symbol,now)
                 if current is None:
                     problems.append(symbol+": 검증된 최신 종가 없음")
@@ -481,8 +485,7 @@ class AccountingEngine:
                      "price_evidence_hash":observed[("PRICE",symbol)]["sha256"],
                      "gross_only":True}
                 holdings.append(row)
-                div_ref=observed.get(("DIVIDENDS",symbol))
-                potential_dividends+=_samples(account_orders,div_ref,now)
+
             for symbol,lot in lots.items():
                 if lot["realized_native"]==0 and not any(x["symbol"]==symbol for x in closed):
                     continue
@@ -496,11 +499,14 @@ class AccountingEngine:
                     "fees_and_tax_complete":False})
         if fx is None and cash_usd:problems.append("USD 현금: USD/KRW 환율 미확인")
         if len(pairs)>96:problems.append("종목별 기준자료 상한 초과")
-        if any(status!="RECONCILED" for _,_,status in corporate):
-            problems.append("기업 분할·합병 등 권리변경 미대조")
+        if corporate:
+            # Stage1 has action evidence but does not adjust inventory/cost
+            # after splits/mergers. Even RECONCILED metadata cannot prove
+            # that quantities in virtual_orders were transformed correctly.
+            problems.append("기업 분할·합병 등 권리변경 발생: 재고·원가 조정 엔진 미연결")
         full=not problems
         nav=cash_krw+(cash_usd*fx if fx is not None else Decimal(0))+position_total
-        if nav<0:problems.append("자산 총액 음수")
+        if nav<=0:problems.append("양수의 전체 가상자산 평가금액 필요")
         full=not problems
         flows=[(key,created,amount) for key,kind,amount,usd,rate,created
                in cash_events if kind=="deposit"]
