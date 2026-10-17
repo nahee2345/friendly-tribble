@@ -424,6 +424,55 @@ class MarketStore:
                 "sha256":digest,"data":json.loads(packed),
                 "tradeable":False,"use_for_paper_execution":False}
 
+    def latest_many(self, pairs, *, now=None):
+        """Read up to 96 verified source pointers in one SQLite roundtrip.
+
+        This is research-only and never returns executable reference prices.
+        Check the stored normalized-content digest again before scoring.
+        """
+        if (not isinstance(pairs,(list,tuple)) or len(pairs)>96
+            or any(not isinstance(pair,tuple) or len(pair)!=2
+                   or pair[0] not in CATEGORIES or
+                   not isinstance(pair[1],str) or not ALLOWED_SYMBOL.fullmatch(pair[1])
+                   for pair in pairs)):
+            raise ValueError("invalid batched research lookup")
+        unique=list(dict.fromkeys(pairs))
+        out={key:{"status":"unavailable","kind":key[0],"symbol":key[1],
+                  "reason":"NO_VERIFIED_SNAPSHOT"} for key in unique}
+        if not unique:return out
+        placeholders=",".join(["(?,?)"]*len(unique))
+        params=[part for key in unique for part in key]
+        with closing(self._db()) as db:
+            rows=db.execute(f"""SELECT c.kind,c.symbol,s.provider,s.source_url,s.as_of,
+                    s.currency,s.quality,s.recorded_utc,s.sha256,s.payload_json,
+                    c.confirmed_utc
+                FROM market_current c JOIN market_snapshots s
+                  ON s.kind=c.kind AND s.symbol=c.symbol AND
+                     s.provider=c.provider AND s.sha256=c.sha256
+                WHERE (c.kind,c.symbol) IN ({placeholders})""",params).fetchall()
+        stamp=_aware(now)
+        for kind,symbol,provider,url,as_of,currency,quality,recorded,digest,packed,confirmed in rows:
+            if hashlib.sha256(packed.encode("utf-8")).hexdigest()!=digest:
+                out[(kind,symbol)]={"status":"unavailable","kind":kind,"symbol":symbol,
+                                    "reason":"CACHE_INTEGRITY_FAILED"}
+                continue
+            try:
+                data=json.loads(packed)
+                age=(stamp-datetime.fromisoformat(confirmed)).total_seconds()
+                if age<0:raise ValueError("future validation timestamp")
+            except (TypeError,ValueError,json.JSONDecodeError):
+                out[(kind,symbol)]={"status":"unavailable","kind":kind,"symbol":symbol,
+                                    "reason":"CACHE_METADATA_INVALID"}
+                continue
+            out[(kind,symbol)]={
+                "status":"ok" if age<=3600 else "stale",
+                "kind":kind,"symbol":symbol,"provider":provider,"source_url":url,
+                "as_of":as_of,"currency":currency,"quality":quality,
+                "recorded_utc":recorded,"last_verified_utc":confirmed,
+                "age_seconds":round(age,1),"sha256":digest,
+                "data":data,"tradeable":False,"use_for_paper_execution":False}
+        return out
+
     def health(self,*,limit=40):
         if type(limit) is not int or not 1<=limit<=100:
             raise ValueError("invalid limit")
