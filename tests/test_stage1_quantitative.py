@@ -253,3 +253,87 @@ def test_missing_cross_currency_data_never_claims_diversification(tmp_path):
     result=QuantEngine(cache).batch([{"symbol":"AAPL","kind":"STOCK"}],weights,
                  holdings=[{"symbol":"069500","quantity":2}],now=NOW)["items"][0]
     assert result["strategies"]["asset_allocation"]["status"]=="unavailable"
+
+
+def test_market_collector_round_robin_includes_history_dividend_not_just_quotes(tmp_path):
+    from wealthy_server.stage1_collectors import Collector
+    from wealthy_server.stage1_paper import Stage1Ledger
+    from wealthy_server.stage1_portfolios import Portfolios
+    import os
+    paper=Portfolios(tmp_path/"paper.sqlite3")
+    Stage1Ledger(paper.path).state("owner",date(2026,10,17))
+    market=MarketStore.for_portfolios(paper)
+    from wealthy_server.stage1_collectors import _provider
+    def bad(*args,**kw):return {"status":"unavailable","reason":"SOURCE_UNAVAILABLE"}
+    collector=Collector(market,quote=bad,history_us=bad,history_kr=bad,
+                        dividends=bad,fx=bad,
+                        news=lambda:{"status":"ok","items":[],"unavailable":[]},
+                        fundamentals=bad)
+    seen=set()
+    # Five iterations at fixed wall time; cache cooldown makes each retry
+    # eligible only after its own TTL, not every minute.
+    for _ in range(8):
+        result=collector.tick("owner",paper,max_requests=6)
+        assert len(result["attempts"])<=6
+        seen.update(x["kind"] for x in result["attempts"])
+    assert {"PRICE","HISTORY","DIVIDENDS","FX","NEWS"}<=seen
+    assert paper.orders("owner","default")["orders"]==[]
+
+
+def test_sec_collector_keeps_two_annual_and_one_quarterly_period_without_mix():
+    from wealthy_server.stage1_collectors import sec_facts
+    from datetime import date
+    import json
+    today=date.today()
+    fiscal_recent=today-timedelta(days=90)
+    fiscal_older=fiscal_recent-timedelta(days=365)
+    def sec_item(start,end,form,val):
+        return {"form":form,"start":start.isoformat(),"end":end.isoformat(),
+                "filed":(end+timedelta(days=20)).isoformat(),"val":val,
+                "accn":"0000320193-26-000001"}
+    a0=sec_item(fiscal_recent-timedelta(days=364),fiscal_recent,"10-K",6000)
+    a1=sec_item(fiscal_older-timedelta(days=364),fiscal_older,"10-K",5000)
+    q0=sec_item(today-timedelta(days=95),today-timedelta(days=7),"10-Q",1500)
+    # Accidental quarterly value is higher but must remain identified as Q.
+    dataset={"cik":320193,"facts":{"us-gaap":{"Revenues":{"units":{
+        "USD":[a0,a1,q0]}}}}}
+    official={"0":{"ticker":"AAPL","cik_str":320193}}
+    class Remote:
+        def __init__(self,data):self.data=json.dumps(data).encode()
+        def __enter__(self):return self
+        def __exit__(self,*args):return False
+        def read(self,size):return self.data[:size]
+    def fetch(req,timeout):
+        return Remote(official if req.full_url.endswith("company_tickers.json") else dataset)
+    out=sec_facts("AAPL",fetcher=fetch,contact="test@example.com")
+    assert out["status"]=="ok"
+    rev=[x for x in out["facts"] if x["tag"]=="Revenues"]
+    assert len(rev)==3
+    assert sum(x["form"]=="10-K" for x in rev)==2
+    assert sum(x["form"]=="10-Q" for x in rev)==1
+    assert all(x["period_start"] for x in rev)
+    norm=validated_snapshot("FUNDAMENTALS","AAPL","SEC_EDGAR",
+                            out["source_url"],out)
+    assert len(norm["payload"]["facts"])==3
+    computed=_growth(norm["payload"]["facts"],{
+        "kind":"FUNDAMENTALS","provider":"SEC_EDGAR","source_url":out["source_url"],
+        "as_of":norm["as_of"],"recorded_utc":norm["recorded_utc"],
+        "sha256":norm["sha256"]},today)
+    assert computed["status"]=="scored"
+    assert computed["metrics"]["revenue_yoy_pct"]==20
+
+
+def test_strategy_sort_and_partial_coverage_are_stable(tmp_path):
+    cache=populated(tmp_path)
+    policy={k:0 for k in DEFAULT_WEIGHTS}
+    policy["momentum"]=60
+    policy["growth"]=40
+    candidates=[{"symbol":"MSFT","kind":"STOCK"},{"symbol":"AAPL","kind":"STOCK"}]
+    first=QuantEngine(cache).batch(candidates,policy,now=NOW)
+    second=QuantEngine(cache).batch(candidates,policy,now=NOW)
+    assert [(x["symbol"],x["score"],x["coverage_pct"]) for x in first["items"]]==[
+        (x["symbol"],x["score"],x["coverage_pct"]) for x in second["items"]]
+    assert first["items"][0]["symbol"]=="AAPL"
+    assert first["items"][0]["coverage_pct"]==100
+    assert first["items"][1]["score"] is None
+    assert first["items"][1]["coverage_pct"]==60
