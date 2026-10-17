@@ -3,6 +3,10 @@ import './stage1.css';
 import {Stage1Dashboard} from './Stage1Dashboard';
 
 type A={id:string;name:string;kind:string;krw_cash:string;usd_cash:string;holdings:{symbol:string;quantity:number}[];trades:number};
+type PlannedOrder={request_id:string;side:'BUY'|'SELL';account:string;symbol:string;quantity:number;kind:string;market:string;planned_price:string;notional_krw:string;strategy_score:number|null;coverage_pct:number;reason:string};
+type PlannedRisk={account:string;symbol:string;kind:string;return_pct?:number;approval_required?:boolean;reason:string};
+type PortfolioPlan={status:string;reason:string;for_date:string;portfolio_value_krw:string|null;cash_krw_equivalent:string|null;reserve_percent:string;daily_spend_cap_krw:string|null;allocation:Record<string,{target_pct:string;target_krw:string;held_krw:string;drift_krw:string}>;proposed_orders:PlannedOrder[];review:PlannedRisk[];data_errors:string[];trade_enabled:boolean;quant_ready:number;quant_evaluated:number;rules:string[]};
+
 type State={initial_krw:number;monthly_krw:number;deposit_day:number;reinvest:boolean;auto_trading_enabled?:boolean;events:{id:string;kind:string;krw:number;usd:string}[]};
 type Article={title_original:string;title_ko:string|null;url:string;published:string;translation_status:string};
 type Quote={status:string;tradeable:boolean;symbol?:string;price?:string;currency?:string;as_of?:string;delay_notice?:string};
@@ -14,6 +18,26 @@ async function post<T>(path:string,value:unknown):Promise<T>{const r=await fetch
 const accountTypes:Record<string,string>={GENERAL_OVERSEAS:'해외주식 일반계좌',GENERAL_DOMESTIC:'국내주식 일반계좌',ISA_SIMULATED:'ISA 가상계좌'};
 export function Stage1Page(){
   const [advanced,setAdvanced]=useState(false);
+  const [stage4Plan,setStage4Plan]=useState<PortfolioPlan|null>(null);
+  const [stage4History,setStage4History]=useState<{request_id:string;status:string;symbol:string;side:string;account:string;reason:string;updated_utc:string}[]>([]);
+  async function refreshStage4(){
+    try{
+      const [plan,history]=await Promise.all([
+        get<PortfolioPlan>('/api/v1/stage1/portfolio-plan'),
+        get<{items:typeof stage4History}>('/api/v1/stage1/portfolio-plan/history')]);
+      setStage4Plan(plan);setStage4History(history.items);
+    }catch(e){setStage4Plan(null);setError(String(e));}
+  }
+  async function runStage4(){
+    setBusy(true);setError('');setNotice('');
+    try{
+      const result=await post<{status:string;reason?:string;executed:{symbol:string;side:string}[];skipped:{symbol:string;reason?:string}[]}>('/api/v1/stage1/portfolio-plan/run',{});
+      setNotice(result.executed.length?('검증 완료된 가상거래 '+result.executed.length+'건 기록: '+result.executed.map(x=>x.side+' '+x.symbol).join(', ')):
+        ('신규 가상체결 없음: '+(result.reason??result.skipped.map(x=>x.symbol+' '+(x.reason??'')).join(' · ')||result.status)));
+      await refresh();await refreshStage4();
+    }catch(e){setError(String(e));}finally{setBusy(false);}
+  }
+
   const [fund,setFund]=useState<State|null>(null);
   const [accounts,setAccounts]=useState<A[]>([]);
   const [selected,setSelected]=useState('default');
@@ -92,7 +116,7 @@ export function Stage1Page(){
   async function decideApproval(request_id:string,approve:boolean){await action(async()=>{const r=await post<{items:Approval[]}>('/api/v1/stage1/approvals/decide',{request_id,approve});setApprovals(r.items);},approve?'가상 주문 승인을 기록했습니다. 실제 체결은 별도 재검증 필요.':'승인 요청을 거부했습니다.');}
 
   async function refresh(){try{const f=await get<State>('/api/v1/stage1/account');get<typeof performance>('/api/v1/stage1/performance').then(x=>setPerformance(x)).catch(()=>setPerformance(null));const p=await get<{accounts:A[]}>('/api/v1/stage1/portfolios');setFund(f);setAccounts(p.accounts);setError('');}catch(e){setError(String(e));}}
-  useEffect(()=>{void refresh();void reloadControls();void reloadInbox();void reloadBackups();void refreshCards();void refreshCardHistory();get<typeof preferences>('/api/v1/stage1/preferences').then(setPreferences).catch(()=>{});get<{weights:Record<string,number>;locked:boolean;next_change_at:string|null}>('/api/v1/stage1/strategy-weights').then(r=>{setStrategyWeights(r.weights);setStrategyLock(r);}).catch(()=>{});void refreshDecisions();void refreshImpacts();get<typeof fundingPolicy>('/api/v1/stage1/funding-allocation').then(setFundingPolicy).catch(()=>{});get<{items:typeof dailyReports}>('/api/v1/stage1/daily-reports').then(x=>setDailyReports(x.items)).catch(()=>{});void discover();get<{status:string;usd_krw?:string;as_of?:string}>('/api/v1/stage1/fx').then(setFx).catch(()=>{});(['US','KR'] as const).forEach(region=>get<{items:Article[]}>('/api/v1/stage1/news/'+region).then(x=>setNews(prev=>({...prev,[region]:x.items||[]}))).catch(()=>{}));},[]);
+  useEffect(()=>{void refreshStage4();void refresh();void reloadControls();void reloadInbox();void reloadBackups();void refreshCards();void refreshCardHistory();get<typeof preferences>('/api/v1/stage1/preferences').then(setPreferences).catch(()=>{});get<{weights:Record<string,number>;locked:boolean;next_change_at:string|null}>('/api/v1/stage1/strategy-weights').then(r=>{setStrategyWeights(r.weights);setStrategyLock(r);}).catch(()=>{});void refreshDecisions();void refreshImpacts();get<typeof fundingPolicy>('/api/v1/stage1/funding-allocation').then(setFundingPolicy).catch(()=>{});get<{items:typeof dailyReports}>('/api/v1/stage1/daily-reports').then(x=>setDailyReports(x.items)).catch(()=>{});void discover();get<{status:string;usd_krw?:string;as_of?:string}>('/api/v1/stage1/fx').then(setFx).catch(()=>{});(['US','KR'] as const).forEach(region=>get<{items:Article[]}>('/api/v1/stage1/news/'+region).then(x=>setNews(prev=>({...prev,[region]:x.items||[]}))).catch(()=>{}));},[]);
   useEffect(()=>{let active=true;const fetchStatus=()=>{get<{enabled:boolean;last_checked_at:string|null;last_result:{status:string;reason?:string;symbol?:string}}>('/api/v1/stage1/auto-status').then(x=>{if(active)setAuto(x);}).catch(()=>{});};fetchStatus();const handle=setInterval(fetchStatus,60_000);return()=>{active=false;clearInterval(handle);};},[]);
   useEffect(()=>{get<{orders:typeof orders}>(`/api/v1/stage1/portfolios/${encodeURIComponent(selected)}/orders`).then(x=>setOrders(x.orders)).catch(()=>setOrders([]));},[selected,accounts.length]);
   const current=accounts.find(x=>x.id===selected)||accounts[0];
@@ -102,6 +126,39 @@ export function Stage1Page(){
   return <div className="s1-shell"><button type="button" className="s1-outline" onClick={()=>setAdvanced(false)}>← 통합 대시보드로 돌아가기</button>
     <div className="s1-heading"><div><div className="s1-eyebrow">WEALTHY / PAPER INVESTING</div><p className="s1-desc">기본 계좌: 미국 주식 · 한국 주식 · ISA 각 1개. 시작금 400만 원(미국 80% / 국내 10% / ISA 10%), 매월 25일 35만 원을 동일 비율로 자동 가상 입금합니다.</p><h1>가상 투자 워크스페이스</h1><p>실제 금융계좌와 분리된 모의투자 · 서버 실행 중 1시간마다 검토 · 지연 종가 기준</p></div><span className="s1-pill">{fund?.auto_trading_enabled?'● 자동 모의투자 실행 중':'● 모의거래 전용 / 자동 운용 대기'}</span></div>
     {error&&<div className="s1-error" role="alert">{error}</div>}{notice&&<div className="s1-notice" role="status">{notice}</div>}
+    <section className="s1-panel">
+      <div className="s1-panelhead"><h2>4단계 · 통합 모의투자 주문계획</h2><button className="s1-outline" disabled={busy} onClick={()=>void refreshStage4()}>계획 새로고침</button></div>
+      <p className="s1-desc">전체 가상자산, 미국/한국 및 ETF/개별주 목표 비중, 8전략 정량점수, 현금유보·집중위험을 하나의 주문계획으로 평가합니다. 수집 자료는 연구용이며 실제 주문 전에 공개 종가·환율을 별도로 재검증합니다.</p>
+      <div className="s1-balances">
+        <div><small>가상자산 평가</small><strong>{stage4Plan?.portfolio_value_krw?'₩ '+money(stage4Plan.portfolio_value_krw):'자료 부족'}</strong></div>
+        <div><small>당일 매수 검토 한도</small><strong>{stage4Plan?.daily_spend_cap_krw?'₩ '+money(stage4Plan.daily_spend_cap_krw):'검증 대기'}</strong></div>
+        <div><small>계획 상태</small><strong>{stage4Plan?.status==='ready'?'평가 가능':stage4Plan?.reason??'조회 중'}</strong></div>
+      </div>
+      {stage4Plan?.data_errors.length?<p className="s1-desc">미확인 자료: {stage4Plan.data_errors.join(' · ')}</p>:null}
+      <details><summary>미국·한국 · ETF·개별주 목표 비중과 실제 평가</summary>
+        {Object.entries(stage4Plan?.allocation??{}).map(([key,row])=><p key={key} className="s1-desc">
+          <b>{key}</b> 목표 {row.target_pct}% · 목표금액 ₩{money(row.target_krw)}
+          · 보유 ₩{money(row.held_krw)} · 목표차이 ₩{money(row.drift_krw)}
+        </p>)}
+      </details>
+      <h3>체결 전 검토 주문 {stage4Plan?.proposed_orders.length??0}건</h3>
+      {stage4Plan?.proposed_orders.map(o=><article className="s1-candidate" key={o.request_id}>
+        <h3>{o.side==='BUY'?'매수 검토':'매도 검토'} · {o.symbol} {o.quantity}주 · {o.account}</h3>
+        <p>가상 주문계획 금액 ₩{money(o.notional_krw)} · 8전략 {o.strategy_score??'미평가'}점 · 자료 충족률 {o.coverage_pct}%</p>
+        <details><summary>주문 사유 · 위험 기준</summary><p>{o.reason}</p></details>
+      </article>)}
+      {!stage4Plan?.proposed_orders.length&&<p className="s1-empty">현재 실행 가능한 후보가 없습니다. 평가자료 부족 또는 목표 비중·현금 한도에 따른 정상적인 보류일 수 있습니다.</p>}
+      <h3>매도·집중 위험 재검토 {stage4Plan?.review.length??0}건</h3>
+      {stage4Plan?.review.slice(0,10).map((r,i)=><p className="s1-desc" key={i}>
+        {r.symbol} · {r.account} · {r.reason}{r.approval_required?' · 자동체결 금지 / 별도 승인 필요':''}
+      </p>)}
+      <button className="s1-primary" disabled={busy||paperControl?.paused||stage4Plan?.status!=='ready'||!stage4Plan?.proposed_orders.length}
+        onClick={()=>void runStage4()}>{busy?'검증 중…':'통합 계획으로 가상 모의투자 1회 실행'}</button>
+      <p className="s1-desc">긴급 중지 해제 시에만 실행됩니다. 주문 실행 전 매수가격 편차·원화환산 투자한도·현금유보·중복 요청을 재검증합니다. 30만원 이상 자동체결은 허용하지 않습니다.</p>
+      <details><summary>최근 통합 주문 원장 {stage4History.length}건 · 결과 대조</summary>
+        {stage4History.slice(0,20).map(x=><p className="s1-desc" key={x.request_id}>{x.updated_utc} · {x.account} {x.side} {x.symbol} · {x.status} / {x.reason}</p>)}
+      </details>
+    </section>
     <section className="s1-panel">
       <div className="s1-panelhead"><h2>투자 판단 결과 · 먼저 보기</h2><button className="s1-outline" disabled={decisionBusy} onClick={()=>void refreshDecisions()}>{decisionBusy?'분석 중…':'결과 갱신'}</button></div>
       <p className="s1-desc">사용자 설정과 공개 지연 종가를 이용한 가상투자 검토입니다. 미래 수익률을 보장하지 않습니다.</p>
@@ -174,9 +231,9 @@ export function Stage1Page(){
       <section className="s1-panel s1-preferences"><div className="s1-panelhead"><h2>모의투자 선호 설정</h2><span>사용자별 저장</span></div>
         <div className="s1-preference-grid"><label>미국 시장 {preferences.us_weight}% / 한국 시장 {100-preferences.us_weight}%<input type="range" min="0" max="100" step="5" value={preferences.us_weight} onChange={e=>setPreferences(p=>({...p,us_weight:Number(e.target.value),kr_weight:100-Number(e.target.value)}))}/></label>
         <label>ETF {preferences.etf_weight}% / 개별주 {100-preferences.etf_weight}%<input type="range" min="0" max="100" step="5" value={preferences.etf_weight} onChange={e=>setPreferences(p=>({...p,etf_weight:Number(e.target.value),stock_weight:100-Number(e.target.value)}))}/></label></div>
-        <button className="s1-primary" disabled={busy} onClick={()=>void savePreferences()}>비중 저장</button><p className="s1-desc">선호 비중은 투자 제안 우선순위·향후 자금 배분·자동 ETF 모의매수의 최소 참여 조건에 반영됩니다. 검증되지 않은 데이터를 이용한 자동거래는 실행하지 않습니다.</p>
+        <button className="s1-primary" disabled={busy} onClick={()=>void savePreferences()}>비중 저장</button><p className="s1-desc">선호 비중은 전체 가상자산의 미국/한국 및 ETF/개별주 목표 비중, 신규 입금 배분, 통합 주문계획에 반영됩니다. 검증되지 않은 데이터를 이용한 자동거래는 실행하지 않습니다.</p>
       </section>
-      <section className="s1-panel"><h2>가상 ETF 1회 자동 실행</h2><p className="s1-desc">미국과 ETF 비중이 모두 0%가 아니면 검증된 지연 종가로 미국 ETF 최대 1주를 가상 매수합니다. 최초 투자금의 5%를 넘지 않으며 필요한 경우 참고환율로 가상 환전을 기록합니다. 하루 중복 주문은 차단됩니다. 24시간 무인 자동매매나 AI 수익 예측은 아닙니다.</p><button className="s1-primary" disabled={busy} onClick={()=>void action(async()=>{const r=await post<{status:string;symbol?:string;reason?:string}>('/api/v1/stage1/auto-run',{});if(r.status!=='executed')throw Error(r.reason??'해당 조건에서 주문이 실행되지 않았습니다.');},'ETF 가상 주문 1건이 기록되었습니다.')}>{busy?'검증 중…':'ETF 가상 모의투자 1회 실행'}</button></section>
+      <section className="s1-panel"><h2>자동투자 경로 통합</h2><p className="s1-desc">기존 ETF 단독 실행은 4단계 통합 계획으로 대체됐습니다. 상단의 통합 주문계획에서 계좌별 현금·전략점수·비중과 안전 한도를 확인하고 실행할 수 있습니다.</p></section>
       <section className="s1-panel"><h2>국내 ETF 조사 후보 · 한국/ISA 모의거래</h2>
         <p className="s1-desc">국내 ETF는 6자리 종목코드의 공개 지연 종가가 검증될 때만 가상매수가 가능합니다. 출처: 비공식 Yahoo Finance 일간 차트. 투자수익 보장 또는 실시간 주문이 아닙니다.</p>
         <div className="s1-candidates">
