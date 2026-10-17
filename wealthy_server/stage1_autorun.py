@@ -18,9 +18,9 @@ def paper_run_once(owner, ledger, portfolios, preferences, *, today=None,
                    strategy_weights=None):
     day = today or datetime.now(ZoneInfo('Asia/Seoul')).date()
     prefs = preferences.get(owner)
-    if prefs['us_weight'] < 50 or prefs['etf_weight'] < 50:
+    if prefs['us_weight'] == 0 or prefs['etf_weight'] == 0:
         return {'status': 'skipped', 'traded': False,
-                'reason': '미국·ETF 선호 비중이 각각 50% 이상이어야 합니다.'}
+                'reason': '미국시장 또는 ETF 투자 비중이 0%입니다.'}
     state = ledger.state(owner, day)
     accounts = portfolios.list(owner)['accounts']
     default = next((a for a in accounts if a['id'] == 'default'
