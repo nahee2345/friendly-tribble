@@ -69,7 +69,12 @@ export function Stage1Page(){
 
   type PaperBackup={filename:string;bytes:number;modified_utc:string};
   const [paperBackups,setPaperBackups]=useState<PaperBackup[]>([]);
-  async function reloadBackups(){try{const result=await get<{items:PaperBackup[]}>('/api/v1/stage1/backups');setPaperBackups(result.items);}catch(e){setError(String(e));}}
+  type StorageHealth={schema_version:number;current_version:number;migration_complete:boolean;backup_created:boolean;sqlite_quick_check:boolean;owner_audit:{trade_receipts:number;accounting:{category:string;status:string;count:number}[];corporate:{category:string;status:string;count:number}[]}};
+  const [storageHealth,setStorageHealth]=useState<StorageHealth|null>(null);
+  async function reloadBackups(){try{const [backups,health]=await Promise.all([
+    get<{items:PaperBackup[]}>('/api/v1/stage1/backups'),
+    get<StorageHealth>('/api/v1/stage1/storage-health')
+  ]);setPaperBackups(backups.items);setStorageHealth(health);}catch(e){setError(String(e));}}
   async function createPaperBackup(){await action(async()=>{await post('/api/v1/stage1/backups',{});await reloadBackups();},'가상 원장 백업과 무결성 검사가 완료되었습니다.');}
 
   const [approvals,setApprovals]=useState<Approval[]>([]);
@@ -205,7 +210,9 @@ export function Stage1Page(){
     </div>}
     {section==='overview'&&<section className="s1-panel"><div className="s1-panelhead"><h2>모의계좌 온라인 백업</h2><button className="s1-primary" disabled={busy} onClick={()=>void createPaperBackup()}>지금 백업</button></div>
       <p className="s1-desc">백업은 가상투자 SQLite 원장만 대상으로 합니다. 관리자 로그인·시장 DB는 별도입니다. 무결성 검사를 통과한 파일만 저장하며 이 화면에서는 복원을 실행하지 않습니다.</p>
-      <p className="s1-desc">저장된 백업 {paperBackups.length}개</p>
+      <p className="s1-desc">원장 스키마: {storageHealth ? 'Stage1 v'+storageHealth.schema_version : '검사 대기'} · DB 무결성: {storageHealth ? (storageHealth.sqlite_quick_check?'정상':'검사 실패') : '검사 대기'} · 주문 근거: {storageHealth?.owner_audit.trade_receipts??'–'}건</p>
+       <p className="s1-desc">배당·비용 근거: {storageHealth?.owner_audit.accounting.reduce((a,x)=>a+x.count,0)??'–'}건 · 기업행위 근거: {storageHealth?.owner_audit.corporate.reduce((a,x)=>a+x.count,0)??'–'}건 · 금액은 이후 대조 엔진에서 반영</p>
+       <p className="s1-desc">수동 백업 {paperBackups.length}개 · 기존 데이터가 있으면 스키마 변경 전 별도 자동 백업 생성</p>
       {paperBackups.slice(0,5).map(b=><p key={b.filename}>{b.filename} · {money(b.bytes)} B · {b.modified_utc}</p>)}
     </section>}
     {section==='overview'&&<section className="s1-panel"><h2>자동 입금 배분 · 별도 입력 불필요</h2><p className="s1-desc">시장에서 설정한 미국/한국 비중과 ETF/개별주 비중을 기준으로 앞으로 들어오는 월 35만원을 자동 배분합니다. 기존 입금·거래는 변경하지 않습니다.</p>
