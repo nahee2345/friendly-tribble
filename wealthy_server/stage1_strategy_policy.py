@@ -5,7 +5,7 @@ ETF/equity allocation. Everything else is decided by the simulator.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 STRATEGIES = (
     ("index", "장기지수"),
@@ -55,7 +55,19 @@ class StrategyPolicy:
                        for value in weights.values())
                 or sum(weights.values()) != 100):
             raise ValueError("8개 전략 비중 합계는 반드시 100%여야 합니다.")
-        now = datetime.now(timezone.utc).isoformat()
+        now_dt = datetime.now(timezone.utc)
+        now = now_dt.isoformat()
+        with self.portfolios._db() as db:
+            self._schema(db)
+            current=db.execute("SELECT strategy,weight,updated_at FROM stage1_strategy_weights WHERE owner=?",
+                               (owner,)).fetchall()
+            if current:
+                previous={item[0]:item[1] for item in current}
+                if previous==weights:
+                    return self.get(owner)
+                last_time=max(datetime.fromisoformat(item[2]) for item in current)
+                if last_time.tzinfo is None or last_time > now_dt or now_dt-last_time < timedelta(days=14):
+                    raise ValueError("전략 변경은 직전 적용일로부터 14일 후 가능합니다.")
         with self.portfolios._db() as db:
             db.execute("BEGIN IMMEDIATE")
             self._schema(db)
