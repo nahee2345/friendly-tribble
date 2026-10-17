@@ -12,6 +12,7 @@ type News={title:string;url:string;market:string;symbols:string[];impact:string;
 type NewsReport={status:string;summary:{checked:number;related:number;risk_suspected:number};news:News[];risk_suspected:News[];coverage:string};
 type Security={market:string;symbol:string;name:string;kind:string;source:string;updated_at:string};
 type Catalog={items:Security[];total:number;is_complete:boolean;catalog_status:Record<string,{status:string;download_rows:number}>;notice:string};
+type ReferenceHealth={current_references:Record<string,number>;recent_attempts:{kind:string;symbol:string;provider:string;checked_utc:string;status:string;error_code:string|null;retry_after_utc:string}[];paper_order_eligible:boolean;notice:string;sec_contact_configured:boolean};
 const fmt=(x:string|number|null|undefined,d=0)=>x===null||x===undefined?'자료 없음':Number(x).toLocaleString('ko-KR',{maximumFractionDigits:d});
 function csrf(){const token=document.cookie.split(';').map(x=>x.trim()).find(x=>x.startsWith('wealthy_csrf='));return token?decodeURIComponent(token.slice(13)):'';}
 async function read<T>(url:string):Promise<T>{const r=await fetch(url,{credentials:'same-origin',cache:'no-store'});if(!r.ok)throw Error('데이터 요청 실패: '+r.status);return r.json();}
@@ -47,6 +48,8 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
   const [selected,setSelected]=useState<Security|null>(null);
   const [selectedQuote,setSelectedQuote]=useState<{status:string;price?:string;currency?:string;as_of?:string;source?:string}|null>(null);
   const [riskUnread,setRiskUnread]=useState(0);
+  const [referenceHealth,setReferenceHealth]=useState<ReferenceHealth|null>(null);
+  const [showReferences,setShowReferences]=useState(false);
   async function loadHome(){
     setBusy(true);setError('');
     const results=await Promise.allSettled([read<Hub>('/api/v1/stage1/hub'),read<NewsReport>('/api/v1/stage1/news-30d')]);
@@ -54,6 +57,8 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
     if(results[1].status==='fulfilled')setNews(results[1].value);
     const inbox=await read<{items:{event_id:string;read_at:string|null}[]}>('/api/v1/stage1/inbox').catch(()=>null);
     if(inbox)setRiskUnread(inbox.items.filter(x=>x.event_id.startsWith('risk:')&&!x.read_at).length);
+    const reference=await read<ReferenceHealth>('/api/v1/stage1/reference/health').catch(()=>null);
+    if(reference)setReferenceHealth(reference);
     setBusy(false);
   }
   useEffect(()=>{void loadHome();const interval=setInterval(()=>void loadHome(),300_000);return()=>clearInterval(interval);},[]);
@@ -82,6 +87,9 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
       <button className={tab==='search'?'on':''} onClick={()=>setTab('search')}>전체 종목 검색</button>
       <button onClick={onAdvanced}>자산·설정·보고서</button></nav>
       <button aria-label="새로고침" onClick={()=>void loadHome()} disabled={busy}>↻</button>
+      <button className="wh-refhealth" onClick={()=>setShowReferences(true)} title="공개자료 검증 및 공급자 상태">
+        공개자료 {Object.values(referenceHealth?.current_references??{}).reduce((a,b)=>a+b,0)}종 · 오류 {referenceHealth?.recent_attempts.filter(x=>x.status==='unavailable').length??0}
+      </button>
       <span title="보유종목 관련 하방 위험 의심 알림">위험 알림 {riskUnread}</span>
     </header>
     {error&&<div className="wh-error">{error}</div>}
@@ -120,6 +128,22 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
          <p>종목 검색은 자동매수 승인과 다릅니다. 검증되지 않은 데이터는 체결에 사용하지 않습니다.</p></>:<p>왼쪽에서 종목을 선택해 주세요.</p>}
          <small>{catalog?.notice??'종목목록 범위 확인 중'}</small></div></div>
       </main>}
+    {showReferences&&<div className="wh-overlay" onClick={()=>setShowReferences(false)}>
+      <div className="wh-modal" role="dialog" aria-modal="true" aria-label="공개 금융자료 품질 및 수집 상태" onClick={e=>e.stopPropagation()}>
+        <div className="wh-head"><b>시장 자료 검증 상태</b><button onClick={()=>setShowReferences(false)} aria-label="닫기">✕</button></div>
+        <div className="wh-slide">
+          <p>시세·환율·뉴스·재무는 출처 검증 후 별도 SQLite 캐시에 저장하며, 캐시값만으로 자동 모의주문을 체결하지 않습니다.</p>
+          <p>종류별 검증된 현재 참조: {Object.entries(referenceHealth?.current_references??{}).map(([key,n])=>key+' '+n+'건').join(' / ')||'아직 없음'}</p>
+          {referenceHealth?.recent_attempts.slice(0,20).map((x,i)=><p key={i}>
+            <b>{x.kind} · {x.symbol}</b> · {x.status==='ok'?'조회 확인':'조회 보류'}
+            {x.error_code?' · '+x.error_code:''}
+            <small> · {x.checked_utc.slice(0,16)} UTC · {x.provider}</small>
+          </p>)}
+          <p>SEC 기업 재무자료 연락처: {referenceHealth?.sec_contact_configured?'설정됨':'미설정(자동 조회 불가)'}</p>
+          <p>한국 공식 공시 일부는 인증키 없는 안정적인 조회 범위가 확보되지 않았으므로 미지원 상태입니다.</p>
+        </div>
+      </div>
+    </div>}
     {selectedRisk&&<div className="wh-overlay" onClick={()=>setSelectedRisk(null)}>
       <div className="wh-modal" role="dialog" aria-modal="true" aria-label="보유종목 위험 근거" onClick={e=>e.stopPropagation()}>
         <div className="wh-head"><b>보유종목 뉴스 위험 검토 · {selectedRisk.symbols.join(', ')}</b><button onClick={()=>setSelectedRisk(null)} aria-label="닫기">✕</button></div>
