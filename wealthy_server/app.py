@@ -380,12 +380,15 @@ def create_app(
         stage2_collector = Collector(stage2_store)
         from .stage4_portfolio import PortfolioEngine
         stage4_engine = PortfolioEngine(portfolio_store, preference_store, stage2_store)
+        from .stage5_accounting import AccountingEngine
+        stage5_engine = AccountingEngine(portfolio_store, stage2_store)
         from .stage1_bootstrap import initialize_paper_accounts
         if market_information_auto_start:
             from .stage1_worker import PaperWorker
             paper_worker = PaperWorker(db, stage1, portfolio_store, preference_store,
                                        market_collector=stage2_collector,
-                                       portfolio_engine=stage4_engine)
+                                       portfolio_engine=stage4_engine,
+                                       accounting_engine=stage5_engine)
             app.state.paper_worker = paper_worker
             app.router.add_event_handler("startup", paper_worker.start)
             app.router.add_event_handler("shutdown", paper_worker.stop)
@@ -529,6 +532,26 @@ def create_app(
         class Stage2ReferenceRefresh(BaseModel):
             kind: str
             symbol: str
+
+        @app.get("/api/v1/stage1/accounting")
+        def stage5_accounting(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
+            """Verified, gross-only paper accounting; never changes balance."""
+            initialize_paper_accounts(actor.owner_id,stage1,portfolio_store)
+            try:
+                return stage5_engine.report(actor.owner_id)
+            except (ValueError,KeyError,ArithmeticError):
+                raise _error(422,"PAPER_ACCOUNTING_INCOMPLETE",
+                             "원장 수량·회계증빙을 대조하지 못해 회계분석을 중단했습니다.") from None
+
+        @app.post("/api/v1/stage1/accounting/capture")
+        def stage5_capture(actor: Actor = Depends(mutation_actor)) -> dict[str, Any]:
+            """One immutable complete daily gross NAV, never backfills missing prices."""
+            initialize_paper_accounts(actor.owner_id,stage1,portfolio_store)
+            try:
+                return stage5_engine.capture_daily_nav(actor.owner_id)
+            except (ValueError,KeyError,ArithmeticError):
+                raise _error(422,"PAPER_ACCOUNTING_CAPTURE_REJECTED",
+                             "검증된 시세·환율 및 일별 자산 평가가 부족해 저장되지 않았습니다.") from None
 
         @app.get("/api/v1/stage1/portfolio-plan")
         def stage4_plan(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
