@@ -12,6 +12,9 @@ if [ ! -f "$VENV/bin/python" ]; then
 fi
 PY="$PWD/$VENV/bin/python"
 export PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
+# Reject newly pulled syntax-invalid Python before touching existing data.
+"$PY" -m compileall -q wealthy_server
+
 if [ ! -d web/frontend/node_modules ]; then npm --prefix web/frontend ci; fi
 # Rebuild after every update; cached node_modules avoids repeated downloads.
 npm --prefix web/frontend run build
