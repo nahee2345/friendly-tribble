@@ -6,6 +6,9 @@ type A={id:string;name:string;kind:string;krw_cash:string;usd_cash:string;holdin
 type PlannedOrder={request_id:string;side:'BUY'|'SELL';account:string;symbol:string;quantity:number;kind:string;market:string;planned_price:string;notional_krw:string;strategy_score:number|null;coverage_pct:number;reason:string};
 type PlannedRisk={account:string;symbol:string;kind:string;return_pct?:number;approval_required?:boolean;reason:string};
 type PortfolioPlan={status:string;reason:string;for_date:string;portfolio_value_krw:string|null;cash_krw_equivalent:string|null;reserve_percent:string;daily_spend_cap_krw:string|null;allocation:Record<string,{target_pct:string;target_krw:string;held_krw:string;drift_krw:string}>;proposed_orders:PlannedOrder[];review:PlannedRisk[];data_errors:string[];trade_enabled:boolean;quant_ready:number;quant_evaluated:number;rules:string[]};
+type AccountingPosition={account:string;symbol:string;currency:string;quantity:number;avg_cost_native:string;price_native:string;unrealized_native:string;value_krw:string;unrealized_krw_total:string|null;market_price_effect_krw:string|null;fx_effect_krw:string|null;fx_split_status:string;price_as_of:string;price_source_url:string};
+type AccountingReport={status:string;valuation_complete:boolean;market_valuation_krw:string|null;contributions_krw:string;gross_change_after_contributions_krw:string|null;gross_change_pct:string|null;reference_usd_krw:string|null;native_gross_pnl:Record<string,{realized:string;unrealized:string}>;positions:AccountingPosition[];realizations:{account:string;symbol:string;currency:string;gross_realized_native:string;realized_price_effect_krw:string|null;realized_fx_effect_krw:string|null}[];potential_dividends:{symbol:string;ex_date:string;currency:string;potential_gross:string;status:string;cash_booked:boolean;source_url:string}[];fee_analysis:{actual_fee_amount_complete:boolean;assumed_rate_each_side_pct:string;illustrative_trade_fees_krw:string|null;not_deducted_from_cash:boolean};xirr:{status:string;pct:number|null;reason?:string};twr:{status:string;pct:number|null;reason?:string};tax_illustrations:{status:string;domestic_isa?:{taxable_gain_proxy_krw:string;general_scenario_tax_krw:string;isa_scenario_tax_krw:string;potential_isa_saving_krw:string;warning:string;included_symbols:string[]}|null;warning?:string;excluded?:{symbol:string;reason:string}[]};cash_flows:{deposits_krw:string;deposit_count:number;internal_transfers_excluded:number;virtual_fx_excluded:number};missing:string[];source_evidence:{kind:string;symbol:string;as_of:string;source_url:string}[];warnings:string[]};
+
 
 type State={initial_krw:number;monthly_krw:number;deposit_day:number;reinvest:boolean;auto_trading_enabled?:boolean;events:{id:string;kind:string;krw:number;usd:string}[]};
 type Article={title_original:string;title_ko:string|null;url:string;published:string;translation_status:string};
@@ -19,6 +22,20 @@ const accountTypes:Record<string,string>={GENERAL_OVERSEAS:'해외주식 일반�
 export function Stage1Page(){
   const [advanced,setAdvanced]=useState(false);
   const [stage4Plan,setStage4Plan]=useState<PortfolioPlan|null>(null);
+  const [accounting,setAccounting]=useState<AccountingReport|null>(null);
+  async function refreshAccounting(){
+    try{setAccounting(await get<AccountingReport>('/api/v1/stage1/accounting'));}
+    catch(e){setAccounting(null);setError(String(e));}
+  }
+  async function captureAccounting(){
+    await action(async()=>{
+      const r=await post<{status:string;reason?:string[]}>('/api/v1/stage1/accounting/capture',{});
+      if(!['saved','already_saved'].includes(r.status))
+        throw Error(r.reason?.join(' · ')||'일별 자산평가 저장 기준을 만족하지 못했습니다.');
+    },'검증 완료된 당일 자산평가만 저장했습니다. 동일 날짜는 중복 저장하지 않습니다.');
+    await refreshAccounting();
+  }
+
   const [stage4History,setStage4History]=useState<{request_id:string;status:string;symbol:string;side:string;account:string;reason:string;updated_utc:string}[]>([]);
   async function refreshStage4(){
     try{
@@ -116,7 +133,7 @@ export function Stage1Page(){
   async function decideApproval(request_id:string,approve:boolean){await action(async()=>{const r=await post<{items:Approval[]}>('/api/v1/stage1/approvals/decide',{request_id,approve});setApprovals(r.items);},approve?'가상 주문 승인을 기록했습니다. 실제 체결은 별도 재검증 필요.':'승인 요청을 거부했습니다.');}
 
   async function refresh(){try{const f=await get<State>('/api/v1/stage1/account');get<typeof performance>('/api/v1/stage1/performance').then(x=>setPerformance(x)).catch(()=>setPerformance(null));const p=await get<{accounts:A[]}>('/api/v1/stage1/portfolios');setFund(f);setAccounts(p.accounts);setError('');}catch(e){setError(String(e));}}
-  useEffect(()=>{void refreshStage4();void refresh();void reloadControls();void reloadInbox();void reloadBackups();void refreshCards();void refreshCardHistory();get<typeof preferences>('/api/v1/stage1/preferences').then(setPreferences).catch(()=>{});get<{weights:Record<string,number>;locked:boolean;next_change_at:string|null}>('/api/v1/stage1/strategy-weights').then(r=>{setStrategyWeights(r.weights);setStrategyLock(r);}).catch(()=>{});void refreshDecisions();void refreshImpacts();get<typeof fundingPolicy>('/api/v1/stage1/funding-allocation').then(setFundingPolicy).catch(()=>{});get<{items:typeof dailyReports}>('/api/v1/stage1/daily-reports').then(x=>setDailyReports(x.items)).catch(()=>{});void discover();get<{status:string;usd_krw?:string;as_of?:string}>('/api/v1/stage1/fx').then(setFx).catch(()=>{});(['US','KR'] as const).forEach(region=>get<{items:Article[]}>('/api/v1/stage1/news/'+region).then(x=>setNews(prev=>({...prev,[region]:x.items||[]}))).catch(()=>{}));},[]);
+  useEffect(()=>{void refreshAccounting();void refreshStage4();void refresh();void reloadControls();void reloadInbox();void reloadBackups();void refreshCards();void refreshCardHistory();get<typeof preferences>('/api/v1/stage1/preferences').then(setPreferences).catch(()=>{});get<{weights:Record<string,number>;locked:boolean;next_change_at:string|null}>('/api/v1/stage1/strategy-weights').then(r=>{setStrategyWeights(r.weights);setStrategyLock(r);}).catch(()=>{});void refreshDecisions();void refreshImpacts();get<typeof fundingPolicy>('/api/v1/stage1/funding-allocation').then(setFundingPolicy).catch(()=>{});get<{items:typeof dailyReports}>('/api/v1/stage1/daily-reports').then(x=>setDailyReports(x.items)).catch(()=>{});void discover();get<{status:string;usd_krw?:string;as_of?:string}>('/api/v1/stage1/fx').then(setFx).catch(()=>{});(['US','KR'] as const).forEach(region=>get<{items:Article[]}>('/api/v1/stage1/news/'+region).then(x=>setNews(prev=>({...prev,[region]:x.items||[]}))).catch(()=>{}));},[]);
   useEffect(()=>{let active=true;const fetchStatus=()=>{get<{enabled:boolean;last_checked_at:string|null;last_result:{status:string;reason?:string;symbol?:string}}>('/api/v1/stage1/auto-status').then(x=>{if(active)setAuto(x);}).catch(()=>{});};fetchStatus();const handle=setInterval(fetchStatus,60_000);return()=>{active=false;clearInterval(handle);};},[]);
   useEffect(()=>{get<{orders:typeof orders}>(`/api/v1/stage1/portfolios/${encodeURIComponent(selected)}/orders`).then(x=>setOrders(x.orders)).catch(()=>setOrders([]));},[selected,accounts.length]);
   const current=accounts.find(x=>x.id===selected)||accounts[0];
@@ -209,6 +226,59 @@ export function Stage1Page(){
       {auto?.last_result.kr_stocks&&<p className="s1-desc">한국 개별주: {auto.last_result.kr_stocks.status} · {auto.last_result.kr_stocks.symbol??''} {auto.last_result.kr_stocks.reason??''}</p>}
       {auto?.last_result.domestic?.map((item,i)=><p className="s1-desc" key={i}>{item.account==='kr-base'?'한국 일반계좌':'ISA 계좌'}: {item.status} {item.symbol??''} {item.reason??''}</p>)}
       {auto?.last_result.exits?.map((item,i)=><p className="s1-desc" key={'exit'+i}>매도 검토 {item.account}: {item.symbol} {item.status}</p>)}
+    </section>
+    <section className="s1-panel">
+      <div className="s1-panelhead"><h2>5단계 · 손익·환율·세금·배당 정밀 회계</h2>
+        <button className="s1-outline" onClick={()=>void refreshAccounting()}>회계 재검증</button></div>
+      <p className="s1-desc">검증 종가와 실제 가상원장 체결만 이용한 <b>수수료·세금·배당 입금 전 총손익</b>입니다. 과세·배당 시나리오는 실제 지급·정산과 분리됩니다.</p>
+      <div className="s1-balances">
+        <div><small>검증된 총 가상자산</small><strong>{accounting?.market_valuation_krw?'₩ '+money(accounting.market_valuation_krw):'미확정'}</strong></div>
+        <div><small>총입금 차감 후 총손익</small><strong>{accounting?.gross_change_after_contributions_krw!==null&&accounting?.gross_change_after_contributions_krw!==undefined?'₩ '+money(accounting.gross_change_after_contributions_krw):'미확정'}</strong></div>
+        <div><small>입금일 반영 XIRR(연환산)</small><strong>{accounting?.xirr.status==='ok'?Number(accounting.xirr.pct).toFixed(2)+'%':'산정 보류'}</strong></div>
+      </div>
+      <p className="s1-desc">일별 자산수익률 TWR: {accounting?.twr.status==='ok'?Number(accounting.twr.pct).toFixed(2)+'%':'자료 부족 · '+(accounting?.twr.reason??'검증 중')}
+      · 기준환율: {accounting?.reference_usd_krw??'미확인'}원/USD</p>
+      {accounting?.missing.length?<p className="s1-desc">원장·시세 검증 실패: {accounting.missing.join(' · ')}</p>:null}
+      <details><summary>보유종목 평균원가 · 실현/미실현 주가손익 · 환율효과</summary>
+        {accounting?.positions.map((pos,i)=><article className="s1-candidate" key={pos.account+pos.symbol+i}>
+          <h3>{pos.symbol} · {pos.account} · {pos.quantity}주</h3>
+          <p>평균원가 {pos.avg_cost_native} {pos.currency} · 평가 종가 {pos.price_native} {pos.currency}
+          · 평가금액 ₩{money(pos.value_krw)}</p>
+          <p>주가 미실현 손익 {pos.unrealized_native} {pos.currency}
+          {pos.currency==='USD'?<> · 원화 환산 주가효과 {pos.market_price_effect_krw===null?'매수환율 근거 부족':'₩'+money(pos.market_price_effect_krw)}
+          · 환율효과 {pos.fx_effect_krw===null?'매수환율 근거 부족':'₩'+money(pos.fx_effect_krw)}</>:null}</p>
+          <a href={pos.price_source_url} target="_blank" rel="noreferrer">종가 원본 · {pos.price_as_of} ↗</a>
+        </article>)}
+        {accounting?.realizations.map((x,i)=><p className="s1-desc" key={'closed'+i}>
+          실현: {x.symbol} / {x.account} · {x.gross_realized_native} {x.currency}
+          · 원화 주가효과 {x.realized_price_effect_krw??'자료 없음'}
+          · 환율효과 {x.realized_fx_effect_krw??'자료 없음'}
+        </p>)}
+        {!accounting?.positions.length&&!accounting?.realizations.length&&<p className="s1-empty">보유·실현 거래 기록이 없습니다.</p>}
+      </details>
+      <details><summary>배당락일 이벤트 · 예상 권리 (현금 입금 아님)</summary>
+        {accounting?.potential_dividends.length?accounting.potential_dividends.slice(0,24).map((d,i)=>
+          <p className="s1-desc" key={d.symbol+d.ex_date+i}>
+            <b>{d.symbol}</b> · {d.ex_date} · 과거 배당락일 추정 {d.potential_gross} {d.currency}
+            · 지급일 미확인 · <a href={d.source_url} target="_blank" rel="noreferrer">출처 ↗</a></p>):
+          <p className="s1-desc">확인된 배당락일 지급 권리 후보가 없습니다. 배당이 없었다는 뜻은 아닙니다.</p>}
+        <p className="s1-desc">과거 배당 이벤트는 실제 분배금 지급이나 외국 원천징수와 같지 않으며 가상 현금에 반영하지 않습니다.</p>
+      </details>
+      <details><summary>예상 거래수수료 및 ISA/일반계좌 세후 시나리오</summary>
+        <p className="s1-desc">과거 매매대금의 거래당 0.1% 수수료 가정: {accounting?.fee_analysis.illustrative_trade_fees_krw?'₩'+money(accounting.fee_analysis.illustrative_trade_fees_krw):'환율 근거 부족'}.
+        실제 수수료 증빙이 확정되지 않아 가상자산에서 차감하지 않았습니다.</p>
+        {accounting?.tax_illustrations.domestic_isa?<><p className="s1-desc">
+          국내상장 해외지수 ETF를 현재 평가손익으로 매도한다고 가정한 비교 대상금액 ₩{money(accounting.tax_illustrations.domestic_isa.taxable_gain_proxy_krw)}</p>
+          <p className="s1-desc">일반계좌 예시세금 ₩{money(accounting.tax_illustrations.domestic_isa.general_scenario_tax_krw)}
+           · ISA 예시세금 ₩{money(accounting.tax_illustrations.domestic_isa.isa_scenario_tax_krw)}
+           · 차이 ₩{money(accounting.tax_illustrations.domestic_isa.potential_isa_saving_krw)}</p></>:
+          <p className="s1-desc">비교 가능한 국내상장 해외지수 ETF 평가손익이 없거나 과세유형을 확인하지 못했습니다.</p>}
+        <p className="s1-desc">{accounting?.tax_illustrations.warning}</p>
+        <p className="s1-desc">국내 주식형 ETF의 양도차익·해외 직접상장 주식/ETF를 ISA 비교에 혼합하지 않습니다. ISA 계좌에 해외상장주식 직접 매수는 불가능합니다.</p>
+      </details>
+      <button className="s1-outline" disabled={busy||!accounting?.valuation_complete}
+        onClick={()=>void captureAccounting()}>오늘의 검증된 가상 자산값 스냅샷 저장 (16시 이후)</button>
+      <p className="s1-desc">서버가 실행 중이면 16시 이후 한 번 자동 저장을 시도합니다. 자료가 없던 과거 날짜의 자산이나 수익률을 임의로 생성하지 않습니다.</p>
     </section>
     <section className="s1-panel"><div className="s1-panelhead"><h2>전체 가상 포트폴리오 성과</h2><span>{performance?.complete?'검증된 지연 종가 기준':'가격·환율 추가 확인 필요'}</span></div>
       <div className="s1-balances"><div><small>누적 투자원금</small><strong>₩ {money(performance?.contributions_krw??fund?.initial_krw??4000000)}</strong></div><div><small>총 자산 평가</small><strong>{performance?.complete?'₩ '+money(performance.portfolio_value_krw??'0'):'미확정'}</strong></div><div><small>원금 대비 수익률</small><strong>{performance?.complete?Number(performance.return_pct).toFixed(2)+'%':'미확정'}</strong></div></div>
