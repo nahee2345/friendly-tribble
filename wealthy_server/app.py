@@ -415,6 +415,31 @@ def create_app(
         def stage1_update_preferences(body: AllocationBody, actor: Actor = Depends(mutation_actor)) -> dict[str, Any]:
             return preference_store.save(actor.owner_id, body.us_weight, body.etf_weight)
 
+        from .stage1_strategy_policy import StrategyPolicy, DEFAULT_WEIGHTS
+        stage1_strategy_policy = StrategyPolicy(portfolio_store)
+
+        class StrategyWeightsBody(BaseModel):
+            weights: dict[str, int]
+
+        @app.get("/api/v1/stage1/strategy-weights")
+        def stage1_strategy_weights(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
+            return stage1_strategy_policy.get(actor.owner_id)
+
+        @app.post("/api/v1/stage1/strategy-weights")
+        def stage1_set_strategy_weights(body: StrategyWeightsBody,
+                                        actor: Actor = Depends(mutation_actor)) -> dict[str, Any]:
+            try:
+                return stage1_strategy_policy.save(actor.owner_id, body.weights)
+            except ValueError:
+                raise _error(400, "INVALID_STRATEGY_WEIGHTS",
+                             "8개 투자전략의 정수 비율을 합계 100%로 입력하세요.") from None
+
+        @app.get("/api/v1/stage1/decisions")
+        def stage1_decisions(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
+            from .stage1_decisions import proposal
+            initialize_paper_accounts(actor.owner_id, stage1, portfolio_store)
+            return proposal(actor.owner_id, portfolio_store, preference_store, stage1_strategy_policy)
+
         @app.get("/api/v1/stage1/research/{symbol}")
         def stage1_research(symbol: str, actor: Actor = Depends(current_actor)) -> dict[str, Any]:
             from .stage1_analytics import fetch_daily_history, research_summary
