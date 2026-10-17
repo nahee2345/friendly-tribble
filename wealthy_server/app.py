@@ -477,6 +477,17 @@ def create_app(
             except (ValueError, KeyError, ArithmeticError):
                 raise _error(400, "PAPER_AUTO_REJECTED", "가상 자동주문 검증에 실패했습니다.") from None
 
+        @app.get("/api/v1/stage1/performance")
+        def stage1_performance(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
+            from .stage1_valuation import portfolio_report
+            from .stage1_bootstrap import initialize_paper_accounts
+            initialize_paper_accounts(actor.owner_id, stage1, portfolio_store)
+            try:
+                return portfolio_report(actor.owner_id, portfolio_store, stage1)
+            except (ValueError, KeyError, ArithmeticError):
+                raise _error(422, "VALUATION_INCOMPLETE",
+                             "시세 또는 거래 원장을 평가할 수 없습니다.") from None
+
         @app.get("/api/v1/stage1/auto-status")
         def stage1_auto_status(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
             worker = getattr(app.state, "paper_worker", None)
