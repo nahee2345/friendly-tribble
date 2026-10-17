@@ -67,3 +67,16 @@ def test_seven_cards_are_complete_structure_not_fake_market_values(tmp_path: Pat
     dividend=cards["cards"][3]
     assert dividend["data"]["verified_dividend_krw"] is None
     assert cards["cards"][0]["data"]["paused"] is True
+
+
+def test_emergency_pause_blocks_direct_db_order(tmp_path: Path):
+    ledger,p,prefs,policy=environment(tmp_path)
+    set_paused("owner",p,True,"긴급중지")
+    quote={"symbol":"069500","currency":"KRW","price":"10000","status":"ok",
+           "tradeable":True,"source":"offline test","as_of":"2026-10-16"}
+    with pytest.raises(ValueError,match="긴급 중지"):
+        p.trade("owner","kr-base","069500","BUY",1,"blocked-order-001",quote)
+    assert p.orders("owner","kr-base")["orders"]==[]
+    set_paused("owner",p,False,"사용자 모의투자 재개")
+    p.trade("owner","kr-base","069500","BUY",1,"allowed-order-001",quote)
+    assert len(p.orders("owner","kr-base")["orders"])==1
