@@ -28,6 +28,10 @@ def paper_run_once(owner, ledger, portfolios, preferences, *, today=None,
         return {'status': 'skipped', 'traded': False,
                 'reason': '기본 해외주식 가상계좌가 없습니다.'}
     request_id = f'auto:{day:%Y%m%d}:etf'
+    if any(o['side']=='SELL' and o['id'].startswith(f'exit:{day:%Y%m%d}:')
+           for o in portfolios.orders(owner,'default')['orders']):
+        return {'status':'skipped','traded':False,
+                'reason':'오늘 매도된 계좌는 당일 재매수를 하지 않습니다.'}
     if any(o['id'] == request_id for o in portfolios.orders(owner, 'default')['orders']):
         return {'status': 'already_executed', 'traded': False,
                 'reason': '오늘 가상 ETF 주문이 이미 기록되었습니다.'}
