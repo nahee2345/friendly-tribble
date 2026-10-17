@@ -506,6 +506,34 @@ def create_app(
             except ValueError:
                 raise _error(400,"APPROVAL_NOT_PENDING","승인 대기 중인 유효한 요청만 처리할 수 있습니다.") from None
 
+        @app.get("/api/v1/stage1/hub")
+        def stage1_hub(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
+            from .stage1_hub import dashboard
+            initialize_paper_accounts(actor.owner_id,stage1,portfolio_store)
+            return dashboard(actor.owner_id,portfolio_store,stage1,preference_store)
+
+        @app.get("/api/v1/stage1/news-30d")
+        def stage1_news_30d(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
+            from .stage1_hub import review_news
+            return review_news(actor.owner_id,portfolio_store,notify=True)
+
+        @app.get("/api/v1/stage1/securities")
+        def stage1_securities(q: str = "", market: str = "ALL",
+                              kind: str = "ALL", limit: int = 50,
+                              offset: int = 0, actor: Actor = Depends(current_actor)) -> dict[str, Any]:
+            from .stage1_catalog import ensure_seed,search
+            try:
+                ensure_seed(portfolio_store)
+                return search(portfolio_store,q,market,kind,limit,offset)
+            except ValueError:
+                raise _error(400,"CATALOG_QUERY_INVALID","검색어·시장·상품 유형을 확인해 주세요.") from None
+
+        @app.post("/api/v1/stage1/securities/refresh")
+        def stage1_refresh_securities(actor: Actor = Depends(mutation_actor)) -> dict[str, Any]:
+            from .stage1_catalog import ensure_seed,refresh
+            ensure_seed(portfolio_store)
+            return {"result":refresh(portfolio_store,force=True)}
+
         @app.get("/api/v1/stage1/news-impact")
         def stage1_news_impact(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
             from .stage1_news_impact import portfolio_news_impacts
