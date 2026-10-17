@@ -12,6 +12,12 @@ type News={title:string;url:string;market:string;symbols:string[];impact:string;
 type NewsReport={status:string;summary:{checked:number;related:number;risk_suspected:number};news:News[];risk_suspected:News[];coverage:string};
 type Security={market:string;symbol:string;name:string;kind:string;source:string;updated_at:string};
 type Catalog={items:Security[];total:number;is_complete:boolean;catalog_status:Record<string,{status:string;download_rows:number}>;notice:string};
+type Factor={status:'scored'|'unavailable';score:number|null;why:string[];risks:string[];metrics:Record<string,unknown>;sources:SourceEvidence[];reason?:string};
+type SourceEvidence={kind:string;provider:string;source_url:string;as_of:string;sha256:string;verified_utc:string};
+type QuantAssessment={symbol:string;status:string;recommendation:string;score:number|null;partial_score:number|null;coverage_pct:number;strategies:Record<string,Factor>;strategies_scored:string[];positive_reasons:string[];risk_reasons:string[];unknown_reasons:string[];source_evidence:SourceEvidence[];no_orders:boolean;paper_order_eligible:boolean};
+type QuantBatch={status:string;items:QuantAssessment[];weights:Record<string,number>;evaluated:number;ready:number;scoring_basis:string};
+const strategyLabels:Record<string,string>={index:'장기지수',value:'가치',quality_growth:'우량성장',growth:'성장',high_dividend:'고배당',dividend_growth:'배당성장',momentum:'모멘텀',asset_allocation:'자산배분'};
+
 type ReferenceHealth={current_references:Record<string,number>;recent_attempts:{kind:string;symbol:string;provider:string;checked_utc:string;status:string;error_code:string|null;retry_after_utc:string}[];paper_order_eligible:boolean;notice:string;sec_contact_configured:boolean};
 const fmt=(x:string|number|null|undefined,d=0)=>x===null||x===undefined?'자료 없음':Number(x).toLocaleString('ko-KR',{maximumFractionDigits:d});
 function csrf(){const token=document.cookie.split(';').map(x=>x.trim()).find(x=>x.startsWith('wealthy_csrf='));return token?decodeURIComponent(token.slice(13)):'';}
@@ -49,12 +55,16 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
   const [selectedQuote,setSelectedQuote]=useState<{status:string;price?:string;currency?:string;as_of?:string;source?:string}|null>(null);
   const [riskUnread,setRiskUnread]=useState(0);
   const [referenceHealth,setReferenceHealth]=useState<ReferenceHealth|null>(null);
+  const [quant,setQuant]=useState<QuantBatch|null>(null);
+  const [selectedAssessment,setSelectedAssessment]=useState<QuantAssessment|null>(null);
   const [showReferences,setShowReferences]=useState(false);
   async function loadHome(){
     setBusy(true);setError('');
-    const results=await Promise.allSettled([read<Hub>('/api/v1/stage1/hub'),read<NewsReport>('/api/v1/stage1/news-30d')]);
+    const results=await Promise.allSettled([read<Hub>('/api/v1/stage1/hub'),read<NewsReport>('/api/v1/stage1/news-30d'),
+      read<QuantBatch>('/api/v1/stage1/quantitative')]);
     if(results[0].status==='fulfilled')setHub(results[0].value);else setError('시장·자산 평가를 확인하지 못했습니다. 서버와 가격 공급원을 확인하세요.');
     if(results[1].status==='fulfilled')setNews(results[1].value);
+    if(results[2].status==='fulfilled')setQuant(results[2].value);else setQuant(null);
     const inbox=await read<{items:{event_id:string;read_at:string|null}[]}>('/api/v1/stage1/inbox').catch(()=>null);
     if(inbox)setRiskUnread(inbox.items.filter(x=>x.event_id.startsWith('risk:')&&!x.read_at).length);
     const reference=await read<ReferenceHealth>('/api/v1/stage1/reference/health').catch(()=>null);
@@ -68,8 +78,145 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
     return()=>{active=false;clearTimeout(delay);};
   },[tab,query,market,kind]);
   const relevantNews=useMemo(()=>detail&&news?news.news.filter(n=>n.symbols.includes(detail.symbol)).slice(0,5):[],[detail,news]);
+  const activeQuant=useMemo(()=>detail?quant?.items.find(x=>x.symbol===detail.symbol)??null:null,[detail,quant]);
   const slides=detail?[
-    {head:'투자 판단 요약',body:<><b>{detail.decision}</b><p>{detail.name} ({detail.symbol})</p><p>배정 계좌: {detail.account==='default'?'미국 일반':detail.account==='isa-base'?'ISA':'한국 일반'}</p><p>가격: {detail.price?(detail.currency==='USD'?'$':'₩')+fmt(detail.price,2):'미확인'} · 검토 수량 {detail.quantity_suggestion}주</p><p>판단 기준일: {detail.as_of??'없음'}</p></>},
+    {head:'투자 판단 요약',body:<><b>{activeQuant?.recommendation??'정량 평가 조회 중'}</b><p>{detail.name} ({detail.symbol})</p>
+      <p>정량 종합점수: {activeQuant?.score??'자료 부족'} · 자료 충족률 {activeQuant?.coverage_pct??'–'}%
+        {activeQuant?.score===null&&activeQuant?.partial_score!==null&&<small> · 부분점수 {activeQuant?.partial_score}점 (추천 판정 불가)</small>}</p>
+      <p>기존 기초 매수 검토: {detail.decision} · 배정 계좌 {detail.account==='default'?'미국 일반':detail.account==='isa-base'?'ISA':'한국 일반'}</p>
+      <p>지연 종가: {detail.price?(detail.currency==='USD'?'
+    {head:'최근 30일 가격·추천 근거',body:<>{trend?.status==='ok'?<p><b>실제 최근 30일 종가 변화: {trend.change_pct}%</b> · {trend.first_date} ~ {trend.as_of} · {trend.source}</p>:<p>최근 30일 검증 종가는 {trend?.reason??'조회 중 또는 미확인'}입니다.</p>}{detail.why.map((w,i)=><p key={i}>{i+1}. {w}</p>)}<p>우선순위 {detail.priority_score}: 정책 비중과 상품 분류의 일치도입니다. 향후 수익 예측 점수가 아닙니다.</p></>},
+    {head:'반대 근거·위험',body:<>{activeQuant?.risk_reasons.map((w,i)=><p key={'q'+i}>{i+1}. {w}</p>)}
+      {detail.risks.map((w,i)=><p key={i}>기초 판단: {w}</p>)}
+      {activeQuant?.unknown_reasons.slice(0,5).map((w,i)=><p key={'missing'+i}><small>자료 미확보: {w}</small></p>)}
+      <p>자료 누락·산업 집중·지연 종가의 실제 위험을 별도 검증해야 합니다.</p></>},
+    {head:'매도 검토 계획',body:<><p>보유기간 검토: {detail.holding_horizon}</p><p>{detail.exit_review}</p><p>확정 매도일·수익률이 아니라 조건부 재평가 계획입니다.</p></>},
+    {head:'정량 분석 원본·기준일',body:<>
+      <p>실제 계산에 사용된 공개 자료만 표시합니다. 점수는 미래 수익률 예측값이 아닙니다.</p>
+      {activeQuant?.source_evidence.length?activeQuant.source_evidence.map((x,i)=><p key={i}>
+        <b>{x.kind} · {x.provider}</b> · {x.as_of}<small> · SHA {x.sha256.slice(0,12)}…</small>
+        <a href={x.source_url} target="_blank" rel="noreferrer"> 원본 보기 ↗</a>
+      </p>):<p>정량 계산에 사용할 검증된 공개 자료가 없습니다.</p>}
+    </>},
+    {head:'최근 30일 뉴스·출처',body:<>{relevantNews.length?relevantNews.map((n,i)=><p key={i}><b>{n.impact}</b> · <a href={n.url} target="_blank" rel="noreferrer">{n.title}</a><small> {n.published_utc.slice(0,10)} · {n.confidence}</small></p>):<p>관련성이 검증된 제목 매칭 뉴스가 없습니다. 호재·악재가 없다는 의미는 아닙니다.</p>}<p>가격 출처: {detail.source??'미확인'}</p></>}
+  ]:[];
+  async function refreshCatalog(){setBusy(true);try{await write('/api/v1/stage1/securities/refresh',{});setCatalog(await read<Catalog>('/api/v1/stage1/securities?'+new URLSearchParams({q:query,market,kind,limit:'50'})));}catch{setError('공개 종목 목록을 갱신하지 못했습니다.');}finally{setBusy(false);}}
+  async function openSecurity(x:Security){setSelected(x);setSelectedQuote(null);setSelectedAssessment(null);
+    const [q,assessment]=await Promise.all([
+      read<typeof selectedQuote>('/api/v1/stage1/quote/'+encodeURIComponent(x.symbol)).catch(()=>null),
+      read<QuantAssessment>('/api/v1/stage1/quantitative/'+encodeURIComponent(x.symbol)).catch(()=>null)
+    ]);
+    setSelectedQuote(q);setSelectedAssessment(assessment);
+  }
+  async function openRecommendation(x:Recommendation){setDetail(x);setSlide(0);setTrend(null);
+    const result=await read<PriceTrend>('/api/v1/stage1/last-30d/'+encodeURIComponent(x.symbol)).catch(()=>null);
+    setTrend(current=>current===null?result:current);
+  }
+  return <div className="wh-wrap">
+    <header className="wh-header"><div><b>WEALTHY</b><small>미국·한국 자동 모의투자 · 실시간 호가 아님</small></div>
+      <nav><button className={tab==='home'?'on':''} onClick={()=>setTab('home')}>통합 대시보드</button>
+      <button className={tab==='search'?'on':''} onClick={()=>setTab('search')}>전체 종목 검색</button>
+      <button onClick={onAdvanced}>자산·설정·보고서</button></nav>
+      <button aria-label="새로고침" onClick={()=>void loadHome()} disabled={busy}>↻</button>
+      <button className="wh-refhealth" onClick={()=>setShowReferences(true)} title="공개자료 검증 및 공급자 상태">
+        공개자료 {Object.values(referenceHealth?.current_references??{}).reduce((a,b)=>a+b,0)}종 · 오류 {referenceHealth?.recent_attempts.filter(x=>x.status==='unavailable').length??0}
+      </button>
+      <span title="보유종목 관련 하방 위험 의심 알림">위험 알림 {riskUnread}</span>
+    </header>
+    {error&&<div className="wh-error">{error}</div>}
+    {tab==='home'?<main className="wh-grid">
+      <section className="wh-card wh-markets"><div className="wh-head"><b>시장 현황</b><small>지연 일간 종가 · 기준일 표시</small></div><div className="wh-indexgrid">
+        {(hub?.markets??[{name:'KOSPI'},{name:'KOSDAQ'},{name:'S&P 500'},{name:'NASDAQ'}]).map(m=><div className="wh-index" key={m.name}><small>{m.name}</small><strong>{'value'in m?fmt(m.value,2):'조회 중'}</strong><span>{'change_pct'in m&&m.change_pct!==null&&m.change_pct!==undefined?(m.change_pct>0?'+':'')+m.change_pct+'%':'등락 미확인'}</span><small>{'as_of'in m?m.as_of:'–'}</small></div>)}
+        </div></section>
+      <section className="wh-card wh-assets"><div className="wh-head"><b>내 총자산 흐름</b><small>{hub?.performance.complete?'검증 종가 기준':'평가 미확정'}</small></div>
+        <div className="wh-total">{hub?.performance.complete?'₩'+fmt(hub.performance.portfolio_value_krw):'시세 확인 필요'}</div>
+        <div className="wh-kpis"><span>누적 입금 ₩{fmt(hub?.performance.contributions_krw)}</span><span>손익 {hub?.performance.complete?'₩'+fmt(hub.performance.return_krw):'미확정'}</span><span>수익률 {hub?.performance.complete?fmt(hub.performance.return_pct,2)+'%':'미확정'}</span></div>
+        <div className="wh-chart"><AssetGraph data={hub?.history??[]}/></div><div className="wh-legend"><span>━ 평가자산</span><span>┄ 누적 입금원금</span></div></section>
+      <section className="wh-card wh-accounts"><div className="wh-head"><b>가상계좌</b><small>미국 · 한국 · ISA</small></div>
+        {(hub?.accounts??[]).map(a=><div className="wh-account" key={a.id}><b>{a.id==='default'?'미국 일반':a.id==='kr-base'?'한국 일반':a.id==='isa-base'?'ISA':a.name}</b><span>₩{fmt(a.krw_cash)} · ${fmt(a.usd_cash,2)}</span><small>보유 {a.holdings}종</small></div>)}
+        {!hub&&<p>자산 원장 확인 중</p>}</section>
+      <section className="wh-card wh-news"><div className="wh-head"><b>최근 30일 뉴스·보유종목 영향</b><small>{news?.summary.checked??0}건 검토 · 관련 {news?.summary.related??0}건</small></div>
+        <div className="wh-feed">{(news?.news??[]).slice(0,5).map((n,i)=><div className="wh-newsrow" key={i}><span className={n.impact==='하방 위험 의심'?'wh-danger':''}>{n.impact}</span><a href={n.url} target="_blank" rel="noreferrer">{n.title}</a><small>{n.symbols.join(', ')||n.market}</small></div>)}
+          {!news?.news.length&&<p>최근 30일 기사를 아직 확인하지 못했습니다.</p>}</div>
+        <small className="wh-caveat">제목 기반 관련성 분석이며 실제 가격 영향은 미확인입니다.</small></section>
+      <section className="wh-card wh-risks"><div className="wh-head"><b>보유종목 위험 알림</b><small>{news?.summary.risk_suspected??0}건 의심 · 원문 연결</small></div>
+        {(news?.risk_suspected??[]).slice(0,3).map((n,i)=><button className="wh-riskrow" key={i} onClick={()=>setSelectedRisk(n)}><b>{n.symbols.join(', ')}</b> {n.title}</button>)}
+        {!news?.risk_suspected.length&&<p>현재 수집 범위에서 보유종목 관련 부정 제목을 확인하지 못했습니다.</p>}
+        <small className="wh-caveat">뉴스가 손실을 확정한다는 뜻이 아닙니다. 서버 가동 중 확인 후 알림함에 저장됩니다.</small></section>
+      <section className="wh-card wh-recs"><div className="wh-head"><b>자동 투자 검토 종목</b><small>누르면 추천 근거 카드뉴스</small></div><div className="wh-reclist">
+        {(hub?.recommendations??[]).slice(0,5).map(x=>{
+          const q=quant?.items.find(s=>s.symbol===x.symbol);
+          return <button key={x.symbol} onClick={()=>void openRecommendation(x)}><b>{x.symbol}</b><span>{x.name}</span>
+          <em>{q?.score!==null&&q?.score!==undefined?q.score+'점 · '+q.coverage_pct+'% 충족':q?'자료 부족 · '+q.coverage_pct+'%':'평가 대기'}</em>
+          <small>{q?.recommendation??'기초 후보'} ›</small></button>;
+        })}
+      </div><small className="wh-caveat">3단계 정량 분석은 검증 자료 충족률을 표시하며, 실제 모의주문과 분리된 읽기 전용 평가입니다.</small></section>
+    </main>:<main className="wh-search"><div className="wh-searchbar"><div><h2>미국·한국 상장종목 검색</h2><p>공개 종목목록 캐시 · 가격은 선택 시 조회</p></div>
+       <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="이름 또는 종목코드 (예: 삼성전자, AAPL)"/>
+       <select value={market} onChange={e=>setMarket(e.target.value)}><option value="ALL">전체 시장</option><option value="KR">한국</option><option value="US">미국</option></select>
+       <select value={kind} onChange={e=>setKind(e.target.value)}><option value="ALL">전체 상품</option><option value="STOCK">개별주</option><option value="ETF">ETF</option></select>
+       <button disabled={busy} onClick={()=>void refreshCatalog()}>전체 목록 갱신</button></div>
+       <div className="wh-catalog"><div className="wh-searchresults"><div className="wh-head"><b>검색 결과 {fmt(catalog?.total)}개</b><small>한 번에 최대 50종목</small></div>
+         {(catalog?.items??[]).map(x=><button key={x.market+x.symbol} onClick={()=>void openSecurity(x)}><b>{x.symbol}</b><span>{x.name}</span><small>{x.market} · {x.kind}</small></button>)}
+         {!catalog?.items.length&&<p>검색 결과가 없습니다. 공개 목록 갱신을 시도해 보세요.</p>}</div>
+       <div className="wh-security"><h3>종목 상세</h3>{selected?<><h2>{selected.name}</h2><p>{selected.symbol} · {selected.market} · {selected.kind}</p>
+         <p>기준 종가: {selectedQuote?.status==='ok'?fmt(selectedQuote.price,2)+' '+(selectedQuote.currency||''):'검증되지 않음'}</p><p>기준일: {selectedQuote?.as_of??'미확인'}</p><p>출처: {selectedQuote?.source??selected.source}</p>
+         <div className="wh-assessment">
+           <b>8전략 정량 연구</b>
+           <p>종합점수: {selectedAssessment?.score??'자료 부족'} · 충족률: {selectedAssessment?.coverage_pct??'–'}%
+             · {selectedAssessment?.recommendation??'조회 중'}</p>
+           {Object.entries(strategyLabels).map(([code,label])=><p key={code}>{label}: {selectedAssessment?.strategies[code]?.score??'미평가'}
+             {selectedAssessment?.strategies[code]?.status!=='scored'&&<small> · {selectedAssessment?.strategies[code]?.reason??'미확보'}</small>}</p>)}
+           <small>저장된 검증 자료로만 산출합니다. 연구 점수는 자동주문 근거가 아닙니다.</small>
+         </div>
+         <p>종목 검색은 자동매수 승인과 다릅니다. 검증되지 않은 데이터는 체결에 사용하지 않습니다.</p></>:<p>왼쪽에서 종목을 선택해 주세요.</p>}
+         <small>{catalog?.notice??'종목목록 범위 확인 중'}</small></div></div>
+      </main>}
+    {showReferences&&<div className="wh-overlay" onClick={()=>setShowReferences(false)}>
+      <div className="wh-modal" role="dialog" aria-modal="true" aria-label="공개 금융자료 품질 및 수집 상태" onClick={e=>e.stopPropagation()}>
+        <div className="wh-head"><b>시장 자료 검증 상태</b><button onClick={()=>setShowReferences(false)} aria-label="닫기">✕</button></div>
+        <div className="wh-slide">
+          <p>시세·환율·뉴스·재무는 출처 검증 후 별도 SQLite 캐시에 저장하며, 캐시값만으로 자동 모의주문을 체결하지 않습니다.</p>
+          <p>종류별 검증된 현재 참조: {Object.entries(referenceHealth?.current_references??{}).map(([key,n])=>key+' '+n+'건').join(' / ')||'아직 없음'}</p>
+          {referenceHealth?.recent_attempts.slice(0,20).map((x,i)=><p key={i}>
+            <b>{x.kind} · {x.symbol}</b> · {x.status==='ok'?'조회 확인':'조회 보류'}
+            {x.error_code?' · '+x.error_code:''}
+            <small> · {x.checked_utc.slice(0,16)} UTC · {x.provider}</small>
+          </p>)}
+          <p>SEC 기업 재무자료 연락처: {referenceHealth?.sec_contact_configured?'설정됨':'미설정(자동 조회 불가)'}</p>
+          <p>한국 공식 공시 일부는 인증키 없는 안정적인 조회 범위가 확보되지 않았으므로 미지원 상태입니다.</p>
+        </div>
+      </div>
+    </div>}
+    {selectedRisk&&<div className="wh-overlay" onClick={()=>setSelectedRisk(null)}>
+      <div className="wh-modal" role="dialog" aria-modal="true" aria-label="보유종목 위험 근거" onClick={e=>e.stopPropagation()}>
+        <div className="wh-head"><b>보유종목 뉴스 위험 검토 · {selectedRisk.symbols.join(', ')}</b><button onClick={()=>setSelectedRisk(null)} aria-label="닫기">✕</button></div>
+        <div className="wh-slide"><h3>{selectedRisk.impact}</h3><p>{selectedRisk.title}</p>
+          <p><b>판단 근거:</b> {selectedRisk.reason}</p>
+          <p><b>검증 수준:</b> {selectedRisk.confidence}</p>
+          <p><b>뉴스 발행:</b> {selectedRisk.published_utc.slice(0,10)} · {selectedRisk.source}</p>
+          <p>이 뉴스만으로 자동 매도하지 않습니다. 실제 기업 손익 및 주가 인과관계는 추가 검증이 필요합니다.</p>
+          <p><a href={selectedRisk.url} target="_blank" rel="noreferrer">기사 원문 확인 ↗</a></p>
+        </div>
+      </div></div>}
+    {detail&&<div className="wh-overlay" onClick={()=>setDetail(null)}><div className="wh-modal" role="dialog" aria-modal="true" aria-label="투자 근거 카드뉴스" onClick={e=>e.stopPropagation()}>
+       <div className="wh-head"><b>{detail.symbol} · {slides[slide].head}</b><button onClick={()=>setDetail(null)} aria-label="닫기">✕</button></div>
+       <div className="wh-slide">{slides[slide].body}</div>
+       <div className="wh-slidefooter"><button disabled={slide===0} onClick={()=>setSlide(x=>x-1)}>이전</button><span>{slide+1} / {slides.length}</span><button onClick={()=>slide===slides.length-1?setDetail(null):setSlide(x=>x+1)}>{slide===slides.length-1?'닫기':'다음'}</button></div>
+      </div></div>}
+  </div>;
+}
+:'₩')+fmt(detail.price,2):'미확인'} · 기초 검토 수량 {detail.quantity_suggestion}주 · 기준일 {detail.as_of??'없음'}</p>
+      <p>정량 점수는 주문과 연결되지 않으며, 기존 기초 후보 분류와 다른 결과가 나올 수 있습니다.</p></>},
+    {head:'8개 투자전략 점수·충족률',body:<>
+      <p>사용자 전략 비중 중 평가 가능한 비중: <b>{activeQuant?.coverage_pct??0}%</b></p>
+      {Object.entries(strategyLabels).map(([code,label])=><div className="wh-factor" key={code}><b>{label}</b>
+        <span>비중 {quant?.weights?.[code]??0}% · {activeQuant?.strategies[code]?.status==='scored'
+          ?activeQuant.strategies[code].score+'점':'자료 미확보'}</span>
+        <small>{activeQuant?.strategies[code]?.status==='scored'
+          ?activeQuant.strategies[code].why[0]:activeQuant?.strategies[code]?.reason??'조회 중'}</small></div>)}
+      <p>미평가 전략은 임의의 0점 또는 50점을 부여하지 않습니다.</p>
+    </>},
     {head:'최근 30일 가격·추천 근거',body:<>{trend?.status==='ok'?<p><b>실제 최근 30일 종가 변화: {trend.change_pct}%</b> · {trend.first_date} ~ {trend.as_of} · {trend.source}</p>:<p>최근 30일 검증 종가는 {trend?.reason??'조회 중 또는 미확인'}입니다.</p>}{detail.why.map((w,i)=><p key={i}>{i+1}. {w}</p>)}<p>우선순위 {detail.priority_score}: 정책 비중과 상품 분류의 일치도입니다. 향후 수익 예측 점수가 아닙니다.</p></>},
     {head:'반대 근거·위험',body:<>{detail.risks.map((w,i)=><p key={i}>{i+1}. {w}</p>)}<p>보유 비중과 시세 누락을 별도로 확인해야 합니다.</p></>},
     {head:'매도 검토 계획',body:<><p>보유기간 검토: {detail.holding_horizon}</p><p>{detail.exit_review}</p><p>확정 매도일·수익률이 아니라 조건부 재평가 계획입니다.</p></>},
