@@ -24,7 +24,7 @@ from decimal import Decimal,InvalidOperation,ROUND_HALF_UP
 from zoneinfo import ZoneInfo
 
 from .stage1_market_store import MarketStore
-from .stage5_tax import research_comparison
+from .stage5_tax import research_comparison,foreign_ordinary_scenario,domestic_isa_scenario
 
 ENGINE="stage5-accounting-v1"
 KST=ZoneInfo("Asia/Seoul")
@@ -153,11 +153,15 @@ def _basis(orders,metadata,events_fx,now):
                     precision,rounding=ROUND_HALF_UP))
             profit=price*qty-basis
             bucket["realized_native"]+=profit
+            sale_price_effect=profit if currency=="KRW" else None
+            sale_fx_effect=None
             if currency=="USD":
                 if (bucket["acquisition_fx_complete"] and entry_fx is not None):
                     acquisition_rate=bucket["krw_cost"]/bucket["native_cost"]
-                    bucket["realized_price_krw"]+=profit*acquisition_rate
-                    bucket["realized_fx_krw"]+=price*qty*(entry_fx-acquisition_rate)
+                    sale_price_effect=profit*acquisition_rate
+                    sale_fx_effect=price*qty*(entry_fx-acquisition_rate)
+                    bucket["realized_price_krw"]+=sale_price_effect
+                    bucket["realized_fx_krw"]+=sale_fx_effect
                 else:
                     bucket["realized_fx_complete"]=False
             else:
@@ -172,8 +176,11 @@ def _basis(orders,metadata,events_fx,now):
             closed.append({"symbol":symbol,"side":"SELL","date":order["timestamp"],
                 "accounting_currency":currency,"quantity":qty,
                 "native_gross_gain":s(profit),
-                "krw_gain_split_verified":(currency=="KRW" or
-                    (bucket["realized_fx_complete"] and entry_fx is not None))})
+                "krw_price_effect":s(sale_price_effect),
+                "krw_fx_effect":s(sale_fx_effect),
+                "gross_sale_gain_krw":s((sale_price_effect or Decimal(0))+
+                    (sale_fx_effect or Decimal(0))) if sale_price_effect is not None else None,
+                "krw_gain_split_verified":sale_price_effect is not None})
             if bucket["quantity"]==0:
                 bucket["native_cost"]=Decimal(0)
                 bucket["krw_cost"]=Decimal(0)
@@ -398,7 +405,7 @@ class AccountingEngine:
         observed=self.market.latest_many(pairs[:96],now=now)
         fx=_close(observed.get(("FX","USD/KRW")),"FX","USD/KRW",now)
         problems=[]
-        holdings=[];realizations=[];potential_dividends=[]
+        holdings=[];realizations=[];realized_sales=[];potential_dividends=[]
         native_totals={"USD":{"realized":Decimal(0),"unrealized":Decimal(0)},
                        "KRW":{"realized":Decimal(0),"unrealized":Decimal(0)}}
         position_total=Decimal(0)
@@ -415,6 +422,8 @@ class AccountingEngine:
             account_metadata={request:metadata.get((ident,request),{})
                               for request in [o["id"] for o in account_orders]}
             lots,closed,turnover=_basis(account_orders,account_metadata,event_map,now)
+            realized_sales.extend([{**row,"account":ident,"account_kind":kind}
+                                  for row in closed])
             all_trades+=len(account_orders)
             for order in account_orders:
                 meta=account_metadata.get(order["id"],{})
@@ -559,6 +568,33 @@ class AccountingEngine:
                  if x["currency"]=="KRW"),Decimal(0))
         fee_proxy=(native_turnover_krw+native_turnover_usd*fx)*FEE_RATE_ASSUMED if fx is not None else None
         tax=research_comparison(holdings)
+        # Sale-year annual tax examples are separate from *unrealized* future
+        # sale scenarios. Never add them as accrued or paid liability.
+        sale_year=now.astimezone(KST).year
+        recent=[x for x in realized_sales
+                if stamp(x["date"]).astimezone(KST).year==sale_year]
+        overseas=[x for x in recent if x["account_kind"]=="GENERAL_OVERSEAS"
+                  and x["accounting_currency"]=="USD"]
+        if overseas and all(x["gross_sale_gain_krw"] is not None for x in overseas):
+            projected=sum((D(x["gross_sale_gain_krw"]) for x in overseas),Decimal(0))
+            tax["overseas_general_realized"]=foreign_ordinary_scenario(projected)
+            tax["overseas_general_realized"]["sale_year"]=sale_year
+            tax["overseas_general_realized"]["historical_fx_covered"]=True
+        else:
+            tax["overseas_general_realized"]={"status":"unavailable",
+                "reason":"SELL_FX_OR_REALIZED_FOREIGN_GAIN_MISSING" if overseas
+                          else "NO_YEARLY_FOREIGN_SALES",
+                "not_actual_tax":True}
+        domestic_eligible=[x for x in recent if x["symbol"]=="360750"
+                           and x["accounting_currency"]=="KRW"]
+        if domestic_eligible:
+            realized_gains=sum((D(x["gross_sale_gain_krw"])
+                          for x in domestic_eligible),Decimal(0))
+            tax["domestic_realized_illustration"]=domestic_isa_scenario(realized_gains)
+            tax["domestic_realized_illustration"]["sale_year"]=sale_year
+            tax["domestic_realized_illustration"]["isa_term_not_verified"]=True
+        else:
+            tax["domestic_realized_illustration"]=None
         return {"engine_version":ENGINE,"status":"complete_gross_valuation" if full
                 else "incomplete","as_of_utc":now.isoformat(),
                 "valuation_complete":full,"market_valuation_krw":s(nav) if full else None,
@@ -571,6 +607,7 @@ class AccountingEngine:
                       "unrealized":s(values["unrealized"])}
                     for cur,values in native_totals.items()},
                 "positions":holdings,"realizations":realizations,
+                "realized_sales":realized_sales[:250],
                 "potential_dividends":potential_dividends,
                 "dividend_cash_posted_krw":None,
                 "recorded_unposted_accounting_events":outstanding[:100],
