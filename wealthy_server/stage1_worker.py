@@ -25,6 +25,8 @@ class PaperWorker:
         self.interval = max(3600, interval)
         self.stop_signal = Event()
         self.thread = None
+        self.last_result = {'status': 'waiting', 'reason': '첫 검토 대기'}
+        self.last_checked_at = None
 
     def tick(self):
         # Local mode enforces one owner; never fabricate an owner id.
@@ -37,6 +39,10 @@ class PaperWorker:
         today = datetime.now(ZoneInfo("Asia/Seoul")).date()
         initialize_paper_accounts(owner, self.ledger, self.portfolios, today=today)
         result = paper_run_once(owner, self.ledger, self.portfolios, self.preferences, today=today)
+        self.last_result = {'status': result.get('status', 'unknown'),
+                            'reason': result.get('reason', ''),
+                            'symbol': result.get('symbol')}
+        self.last_checked_at = datetime.now(ZoneInfo("Asia/Seoul")).isoformat()
         log.info("Paper worker tick: %s", result.get("status", "unknown"))
 
     def _loop(self):
@@ -44,6 +50,9 @@ class PaperWorker:
             try:
                 self.tick()
             except Exception:
+                self.last_result = {'status': 'error',
+                                    'reason': '데이터 수집 또는 원장 검증 실패'}
+                self.last_checked_at = datetime.now(ZoneInfo("Asia/Seoul")).isoformat()
                 log.exception("Paper worker tick failed; no live trade was attempted")
             if self.stop_signal.wait(self.interval):
                 break
