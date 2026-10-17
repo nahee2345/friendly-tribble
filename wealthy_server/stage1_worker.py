@@ -13,15 +13,9 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 from .models import User
 from .stage1_bootstrap import initialize_paper_accounts
-from .stage1_autorun import paper_run_once
-from .stage1_domestic import paper_run_domestic
-from .stage1_us_stocks import paper_run_us_stocks
-from .stage1_kr_stocks import paper_run_kr_stocks
-from .stage1_risk import paper_exit_review
-from .stage1_diary import save_daily_paper_report
+ from .stage1_diary import save_daily_paper_report
 from .stage1_strategy_policy import StrategyPolicy
 from .stage1_controls import status as trade_status
-from .stage1_decisions import reserve_ratio
 from .stage1_daily_cards import store_daily_cards_after_16
 from .stage1_catalog import ensure_seed,refresh as refresh_security_catalog
 from .stage1_hub import review_news
@@ -31,11 +25,12 @@ log = logging.getLogger("wealthy.paper.worker")
 
 class PaperWorker:
     def __init__(self, database, ledger, portfolios, preferences, interval=3600,
-                 market_collector=None):
+                 market_collector=None, portfolio_engine=None):
         self.database, self.ledger = database, ledger
         self.portfolios, self.preferences = portfolios, preferences
         self.interval = max(3600, interval)
         self.market_collector = market_collector
+        self.portfolio_engine = portfolio_engine
         self.stop_signal = Event()
         self.thread = None
         self.last_result = {'status': 'waiting', 'reason': '첫 검토 대기'}
@@ -78,29 +73,37 @@ class PaperWorker:
                                 "domestic":[],"exits":[]}
             self.last_checked_at = datetime.now(ZoneInfo("Asia/Seoul")).isoformat()
             return
-        exit_result = paper_exit_review(owner, self.portfolios, today=today)
-        weights = StrategyPolicy(self.portfolios).get(owner)["weights"]
-        result = paper_run_once(owner, self.ledger, self.portfolios,
-                                self.preferences, today=today,
-                                strategy_weights=weights)
-        stocks_result = paper_run_us_stocks(owner,self.ledger,self.portfolios,
-                                              self.preferences,today=today,strategy_weights=weights)
-        domestic_result = paper_run_domestic(owner, self.portfolios, today=today,
-                                             preference=self.preferences.get(owner),
-                                             reserve_percent=reserve_ratio(weights))
-        kr_stocks_result=paper_run_kr_stocks(owner,self.portfolios,self.preferences,
-                                              today=today,reserve_percent=reserve_ratio(weights))
-        save_daily_paper_report(owner, self.portfolios, us=result, domestic=domestic_result, exits=exit_result,
-                                us_stocks=stocks_result, kr_stocks=kr_stocks_result)
-        self.last_result = {'status': result.get('status', 'unknown'),
-                            'domestic': domestic_result.get('results', []),
-                            'us_stocks': stocks_result,
-                            'kr_stocks': kr_stocks_result,
-                            'exits': exit_result.get('events', []),
-                            'reason': result.get('reason', ''),
-                            'symbol': result.get('symbol')}
+        # Stage4 is the single owner of unattended paper allocation and
+        # cost-basis exits. The four historical sleeve loops are deliberately
+        # NOT invoked: they had independent cash caps and could interfere
+        # with portfolio-wide targets.
+        if self.portfolio_engine is None:
+            self.last_result={"status":"disabled",
+                              "reason":"통합 포트폴리오 엔진이 설정되지 않음"}
+        else:
+            result=self.portfolio_engine.run(owner)
+            filled=result.get("executed",[])
+            exits={"events":[{"account":x["account"],"symbol":x["symbol"],
+                "status":"executed","side":"SELL","quantity":x["quantity"]}
+                for x in filled if x["side"]=="SELL"]}
+            save_daily_paper_report(owner,self.portfolios,
+                us={"status":result["status"],"traded":bool(filled),
+                    "reason":result.get("reason",""),
+                    "symbol":filled[0]["symbol"] if filled else None},
+                domestic={"results":[x for x in filled
+                    if x["account"] in ("kr-base","isa-base")]},
+                exits=exits,
+                us_stocks={"status":"stage4_unified","engine":"stage4-v1"},
+                kr_stocks={"status":"stage4_unified","engine":"stage4-v1"})
+            self.last_result={
+                "status":result["status"],"engine":"stage4-v1",
+                "executed":filled,"skipped":result.get("skipped",[]),
+                "exits":exits["events"],"domestic":[x for x in filled
+                    if x["account"] in ("kr-base","isa-base")],
+                "reason":result.get("reason",""),
+                "symbol":filled[0]["symbol"] if filled else None}
         self.last_checked_at = datetime.now(ZoneInfo("Asia/Seoul")).isoformat()
-        log.info("Paper worker tick: %s", result.get("status", "unknown"))
+        log.info("Paper worker Stage4 tick: %s", self.last_result.get("status","unknown"))
 
     def _loop(self):
         while not self.stop_signal.is_set():
