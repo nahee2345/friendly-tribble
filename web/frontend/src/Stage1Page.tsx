@@ -55,7 +55,7 @@ export function Stage1Page(){
   async function discover(){setLoadingCandidates(true);try{const result=await get<{items:Candidate[]}>('/api/v1/stage1/candidates');setCandidates(result.items);}catch(e){setError(String(e));}finally{setLoadingCandidates(false);}}
   async function savePreferences(){await action(()=>post('/api/v1/stage1/preferences',{us_weight:preferences.us_weight,etf_weight:preferences.etf_weight}),'투자 선호 비중이 저장되었습니다.');void discover();}
   const [performance,setPerformance]=useState<{complete:boolean;contributions_krw:number;portfolio_value_krw:string|null;return_krw:string|null;return_pct:string|null;missing:{account:string;symbol:string;reason:string}[]}|null>(null);
-  const [auto,setAuto]=useState<{enabled:boolean;last_checked_at:string|null;last_result:{status:string;reason?:string;symbol?:string;domestic?:{account:string;status:string;symbol?:string;reason?:string}[];exits?:{account:string;status:string;symbol:string;side?:string}[]}}|null>(null);
+  const [auto,setAuto]=useState<{enabled:boolean;last_checked_at:string|null;last_result:{status:string;reason?:string;symbol?:string;domestic?:{account:string;status:string;symbol?:string;reason?:string}[];us_stocks?:{status:string;symbol?:string;reason?:string};kr_stocks?:{status:string;symbol?:string;reason?:string};exits?:{account:string;status:string;symbol:string;side?:string}[]}}|null>(null);
   const [busy,setBusy]=useState(false);const [error,setError]=useState('');const [notice,setNotice]=useState('');
   type Approval={request_id:string;account:string;symbol:string;side:string;quantity:number;amount_krw:number;rationale:string;status:string;expires_at:string;executed:boolean};
   const [paperControl,setPaperControl]=useState<{paused:boolean;reason:string}|null>(null);
@@ -140,6 +140,8 @@ export function Stage1Page(){
     <section className="s1-panel"><div className="s1-panelhead"><h2>자동 가상투자 운용</h2><span>{auto?.enabled?'서버 실행 중':'검토 대기'}</span></div>
       <p className="s1-desc">서버 가동 중 약 1시간마다 지연 시세를 확인합니다. 검증되지 않은 주문은 건너뜁니다.</p>
       <p className="s1-desc">최근 검사: {auto?.last_checked_at??'대기 중'} · 결과: {auto?.last_result.status??'대기'} {auto?.last_result.reason??''}</p>
+      {auto?.last_result.us_stocks&&<p className="s1-desc">미국 개별주: {auto.last_result.us_stocks.status} · {auto.last_result.us_stocks.symbol??''} {auto.last_result.us_stocks.reason??''}</p>}
+      {auto?.last_result.kr_stocks&&<p className="s1-desc">한국 개별주: {auto.last_result.kr_stocks.status} · {auto.last_result.kr_stocks.symbol??''} {auto.last_result.kr_stocks.reason??''}</p>}
       {auto?.last_result.domestic?.map((item,i)=><p className="s1-desc" key={i}>{item.account==='kr-base'?'한국 일반계좌':'ISA 계좌'}: {item.status} {item.symbol??''} {item.reason??''}</p>)}
       {auto?.last_result.exits?.map((item,i)=><p className="s1-desc" key={'exit'+i}>매도 검토 {item.account}: {item.symbol} {item.status}</p>)}
     </section>
