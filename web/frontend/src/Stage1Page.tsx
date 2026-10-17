@@ -27,6 +27,11 @@ export function Stage1Page(){
   const [dailyReports,setDailyReports]=useState<{date:string;checked_at:string;us:{status:string;symbol?:string;reason?:string};domestic:{account:string;status:string;symbol?:string;reason?:string}[];exits:{account:string;symbol:string;status:string}[]}[]>([]);
   type Candidate={symbol:string;name:string;kind:string;market:string;thesis:string;risks:string;issuer_url:string;quote:Quote;rating:string;account:string; evidence:string[]};
   const [candidates,setCandidates]=useState<Candidate[]>([]);
+  type Research={status:string;reason?:string;symbol?:string;as_of?:string;observations?:number;momentum_60_sessions_pct?:number;annualized_volatility_pct?:number;max_drawdown_pct?:number;trend?:string;backtest?:{return_pct:number;buy_hold_return_pct:number;turnovers:number;fee_bps_per_trade:number;assumptions:string};strategies?:Record<string,{available:boolean;reason?:string;signal?:string}>};
+  const [research,setResearch]=useState<Research|null>(null);
+  const [researchLoading,setResearchLoading]=useState(false);
+  async function loadResearch(ticker:string){setResearchLoading(true);try{setResearch(await get<Research>('/api/v1/stage1/research/'+encodeURIComponent(ticker)));}catch(e){setError(String(e));}finally{setResearchLoading(false);}}
+
   const [loadingCandidates,setLoadingCandidates]=useState(false);
   async function discover(){setLoadingCandidates(true);try{const result=await get<{items:Candidate[]}>('/api/v1/stage1/candidates');setCandidates(result.items);}catch(e){setError(String(e));}finally{setLoadingCandidates(false);}}
   async function savePreferences(){await action(()=>post('/api/v1/stage1/preferences',{us_weight:preferences.us_weight,etf_weight:preferences.etf_weight}),'투자 선호 비중이 저장되었습니다.');void discover();}
@@ -76,11 +81,23 @@ export function Stage1Page(){
             <div className="s1-candidate-actions"><button className="s1-primary" onClick={()=>{setSelected(account);setSymbol(code);setQuote(null);setSide('BUY');setQty(1);setSection('trade');}}>국내 ETF 가상 주문 열기</button></div></article>)}
         </div>
       </section>
+      <section className="s1-panel"><h2>API 키 없는 시장 분석·간단 백테스트</h2><p className="s1-desc">미국 ETF/주식 공개 지연 종가를 사용해 추세, 변동성, 최대낙폭과 이동평균 전략의 과거 성과를 계산합니다. 수수료는 가정값이며 실제 수익 전망이나 자동매매 추천이 아닙니다.</p>
+        {researchLoading&&<p>일간 가격 기록 검증 중…</p>}
+        {research&&<div className="s1-candidate"><h3>{research.symbol??'분석 결과'} · {research.status==='ok'?'분석 완료':'데이터 부족'}</h3>
+          {research.status==='ok'?<><p>기준일: {research.as_of} · 가격 데이터 {research.observations}개</p>
+            <div className="s1-balances"><div><small>60거래일 가격 변화</small><strong>{research.momentum_60_sessions_pct}%</strong></div>
+            <div><small>연율화 변동성</small><strong>{research.annualized_volatility_pct}%</strong></div><div><small>과거 최대낙폭</small><strong>{research.max_drawdown_pct}%</strong></div></div>
+            <p>이동평균 추세: {research.trend==='uptrend'?'상승 추세 조건 충족':'상승 추세 조건 미충족'}</p>
+            <p>간단 백테스트 수익률: {research.backtest?.return_pct}% / 같은 기간 단순 보유: {research.backtest?.buy_hold_return_pct}%</p>
+            <small>가정: {research.backtest?.assumptions} · 거래당 수수료 가정 {research.backtest?.fee_bps_per_trade}bp</small>
+            <p className="s1-desc">8전략 중 현재 자동 계산 가능한 요소: 모멘텀 1개. 재무·배당 자료가 확인되지 않은 7개 전략은 점수나 투자 신호를 생성하지 않습니다.</p></>
+            :<p>분석 불가: {research.reason}. 자료가 없을 때 임의 수익률을 표시하지 않습니다.</p>}</div>}
+      </section>
       <section className="s1-panel"><div className="s1-panelhead"><h2>미국 ETF·주식 조사 후보</h2><button className="s1-outline" disabled={loadingCandidates} onClick={()=>void discover()}>{loadingCandidates?'시세 조회 중…':'후보·가격 새로고침'}</button></div>
       <p className="s1-desc">미국 자산 우선 · ETF 선호 반영 · 공식 발행사 자료와 지연 종가. 예상 수익 또는 AI 매수 신호가 아닙니다.</p>
       <div className="s1-candidates">{candidates.map(c=><article className="s1-candidate" key={c.symbol}><div className="s1-candidate-header"><div><span className="s1-symbol">{c.symbol}</span> <span className="s1-kind">{c.kind==='ETF'?'ETF':'개별주'}</span><h3>{c.name}</h3></div><strong>{c.quote.tradeable?`$${money(c.quote.price??0)}`:'시세 미확인'}</strong></div>
         <p>{c.thesis}</p><small>위험: {c.risks}</small><small>{c.account}</small><small>{c.quote.as_of?`시세 기준일 ${c.quote.as_of} · 지연 종가`:'시세 검증 실패 · 주문 차단'}</small>
-        <div className="s1-candidate-actions"><a href={c.issuer_url} target="_blank" rel="noopener noreferrer">운용사·기업 공식 자료 보기 ↗</a><button disabled={!c.quote.tradeable} className="s1-primary" onClick={()=>{setSymbol(c.symbol);setSide('BUY');setQty(1);setQuote(c.quote);setSection('trade');}}>이 종목 가상 매수하기</button></div>
+        <div className="s1-candidate-actions"><a href={c.issuer_url} target="_blank" rel="noopener noreferrer">운용사·기업 공식 자료 보기 ↗</a><button className="s1-outline" disabled={researchLoading} onClick={()=>void loadResearch(c.symbol)}>가격 분석·백테스트</button><button disabled={!c.quote.tradeable} className="s1-primary" onClick={()=>{setSymbol(c.symbol);setSide('BUY');setQty(1);setQuote(c.quote);setSection('trade');}}>이 종목 가상 매수하기</button></div>
       </article>)}</div>
       {!loadingCandidates&&!candidates.length&&<p className="s1-empty">조사 후보를 불러오지 못했습니다. 네트워크 상태를 확인해 주세요.</p>}
       <p className="s1-desc">국내 주식은 검증된 가격 공급원과 계좌·세제 검사가 연결되기 전까지 주문할 수 없습니다. 미국 주식도 주문 순간 서버에서 가격을 재확인합니다.</p>
