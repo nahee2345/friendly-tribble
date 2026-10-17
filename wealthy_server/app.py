@@ -463,6 +463,18 @@ def create_app(
             except ValueError:
                 raise _error(404,"INBOX_ITEM_NOT_FOUND","읽음 처리할 알림을 찾을 수 없습니다.") from None
 
+        @app.get("/api/v1/stage1/storage-health")
+        def stage1_storage_health(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
+            from .stage1_schema import version_status
+            from .stage1_audit import Stage1Audit
+            with portfolio_store._db() as paper_db:
+                status = version_status(paper_db)
+                integrity = paper_db.execute("PRAGMA quick_check").fetchone()
+                status["sqlite_quick_check"] = integrity is not None and integrity[0] == "ok"
+            status["owner_audit"] = Stage1Audit(portfolio_store).overview(actor.owner_id)
+            status["restoration_performed"] = False
+            return status
+
         @app.get("/api/v1/stage1/backups")
         def stage1_list_backups(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
             from .stage1_backup import list_paper_backups
