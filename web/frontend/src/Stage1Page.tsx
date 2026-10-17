@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import './stage1.css';
 
 type A={id:string;name:string;kind:string;krw_cash:string;usd_cash:string;holdings:{symbol:string;quantity:number}[];trades:number};
-type State={initial_krw:number;monthly_krw:number;deposit_day:number;reinvest:boolean;events:{id:string;kind:string;krw:number;usd:string}[]};
+type State={initial_krw:number;monthly_krw:number;deposit_day:number;reinvest:boolean;auto_trading_enabled?:boolean;events:{id:string;kind:string;krw:number;usd:string}[]};
 type Article={title_original:string;title_ko:string|null;url:string;published:string;translation_status:string};
 type Quote={status:string;tradeable:boolean;symbol?:string;price?:string;currency?:string;as_of?:string;delay_notice?:string};
 const money=(v:string|number)=>Number(v).toLocaleString('ko-KR',{maximumFractionDigits:2});
@@ -36,7 +36,7 @@ export function Stage1Page(){
   async function action(fn:()=>Promise<unknown>,done:string){setBusy(true);setError('');setNotice('');try{await fn();await refresh();setNotice(done);if(current){const x=await get<{orders:typeof orders}>(`/api/v1/stage1/portfolios/${encodeURIComponent(selected)}/orders`);setOrders(x.orders);}}catch(e){setError(String(e));}finally{setBusy(false);}}
   const displayValue=(accounts.reduce((v,a)=>v+Number(a.krw_cash),0));
   return <div className="s1-shell">
-    <div className="s1-heading"><div><div className="s1-eyebrow">WEALTHY / PAPER INVESTING</div><h1>가상 투자 워크스페이스</h1><p>실제 금융계좌와 완전히 분리된 모의투자 · 장 종료 후 지연 종가 기준</p></div><span className="s1-pill">● 모의거래 전용</span></div>
+    <div className="s1-heading"><div><div className="s1-eyebrow">WEALTHY / PAPER INVESTING</div><p className="s1-desc">기본 계좌: 미국 주식 · 한국 주식 · ISA 각 1개. 시작금 400만 원(미국 80% / 국내 10% / ISA 10%), 매월 25일 35만 원을 동일 비율로 자동 가상 입금합니다.</p><h1>가상 투자 워크스페이스</h1><p>실제 금융계좌와 분리된 모의투자 · 서버 실행 중 1시간마다 검토 · 지연 종가 기준</p></div><span className="s1-pill">{fund?.auto_trading_enabled?'● 자동 모의투자 실행 중':'● 모의거래 전용 / 자동 운용 대기'}</span></div>
     {error&&<div className="s1-error" role="alert">{error}</div>}{notice&&<div className="s1-notice" role="status">{notice}</div>}
     <div className="s1-stats">
       <div className="s1-tile"><small>전체 가상 원화 현금</small><strong>₩ {money(displayValue)}</strong><span>계좌 {accounts.length}개 합계</span></div>
