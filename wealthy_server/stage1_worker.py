@@ -15,6 +15,7 @@ from .models import User
 from .stage1_bootstrap import initialize_paper_accounts
 from .stage1_autorun import paper_run_once
 from .stage1_domestic import paper_run_domestic
+from .stage1_us_stocks import paper_run_us_stocks
 from .stage1_risk import paper_exit_review
 from .stage1_diary import save_daily_paper_report
 from .stage1_strategy_policy import StrategyPolicy
@@ -58,12 +59,15 @@ class PaperWorker:
         result = paper_run_once(owner, self.ledger, self.portfolios,
                                 self.preferences, today=today,
                                 strategy_weights=weights)
+        stocks_result = paper_run_us_stocks(owner,self.ledger,self.portfolios,
+                                              self.preferences,today=today,strategy_weights=weights)
         domestic_result = paper_run_domestic(owner, self.portfolios, today=today,
                                              preference=self.preferences.get(owner),
                                              reserve_percent=reserve_ratio(weights))
         save_daily_paper_report(owner, self.portfolios, us=result, domestic=domestic_result, exits=exit_result)
         self.last_result = {'status': result.get('status', 'unknown'),
                             'domestic': domestic_result.get('results', []),
+                            'us_stocks': stocks_result,
                             'exits': exit_result.get('events', []),
                             'reason': result.get('reason', ''),
                             'symbol': result.get('symbol')}
