@@ -23,6 +23,8 @@ from .stage1_strategy_policy import StrategyPolicy
 from .stage1_controls import status as trade_status
 from .stage1_decisions import reserve_ratio
 from .stage1_daily_cards import store_daily_cards_after_16
+from .stage1_catalog import ensure_seed,refresh as refresh_security_catalog
+from .stage1_hub import review_news
 
 log = logging.getLogger("wealthy.paper.worker")
 
@@ -49,6 +51,16 @@ class PaperWorker:
         initialize_paper_accounts(owner, self.ledger, self.portfolios, today=today)
         store_daily_cards_after_16(owner,self.portfolios,self.ledger,
                                    self.preferences,StrategyPolicy(self.portfolios))
+        # Collection failures must not suppress paper risk controls.
+        try:
+            ensure_seed(self.portfolios)
+            refresh_security_catalog(self.portfolios)
+        except Exception:
+            log.warning("Security directory refresh deferred",exc_info=True)
+        try:
+            review_news(owner,self.portfolios,notify=True)
+        except Exception:
+            log.warning("30-day holding news review unavailable",exc_info=True)
         control = trade_status(owner, self.portfolios)
         if control["paused"]:
             self.last_result = {"status":"paused","reason":control["reason"],
