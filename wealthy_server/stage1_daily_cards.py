@@ -5,6 +5,7 @@ completed 16:00 market report unless separately stored after that time.
 """
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from decimal import Decimal
@@ -64,3 +65,52 @@ def generate_cards(owner, portfolios, ledger, preference_store, strategy_policy,
             "for_date":(today or now.date()).isoformat(),"cards":cards,
             "simulated_only":True,
             "note":"외부 데이터 없이 계산 가능한 카드만 표시; 배당/세금/시장정보는 연결 전 미확인."}
+
+
+def store_daily_cards_after_16(owner,portfolios,ledger,preference_store,strategy_policy,*,now=None):
+    """Persist one owner/day snapshot after 16 KST; mark late snapshots explicitly."""
+    stamp=now or datetime.now(ZoneInfo("Asia/Seoul"))
+    if stamp.tzinfo is None:
+        raise ValueError("timezone required")
+    stamp=stamp.astimezone(ZoneInfo("Asia/Seoul"))
+    if stamp.hour<16:
+        return {"status":"not_due","report_date":stamp.date().isoformat()}
+    report_date=stamp.date().isoformat()
+    with portfolios._db() as db:
+        db.execute("""CREATE TABLE IF NOT EXISTS stage1_seven_card_reports (
+          owner TEXT NOT NULL, report_date TEXT NOT NULL,
+          generated_kst TEXT NOT NULL, delayed INTEGER NOT NULL,
+          snapshot_json TEXT NOT NULL, PRIMARY KEY(owner,report_date)
+        )""")
+        prior=db.execute("SELECT generated_kst,delayed FROM stage1_seven_card_reports WHERE owner=? AND report_date=?",
+                         (owner,report_date)).fetchone()
+        if prior:
+            return {"status":"already_saved","report_date":report_date,
+                    "generated_kst":prior[0],"delayed":bool(prior[1])}
+    snapshot=generate_cards(owner,portfolios,ledger,preference_store,strategy_policy,today=stamp.date())
+    snapshot["kind"]="SCHEDULED_SNAPSHOT"
+    snapshot["generated_kst"]=stamp.isoformat()
+    delayed=stamp.hour>16 or (stamp.hour==16 and stamp.minute>=30)
+    snapshot["late_generation"]=delayed
+    with portfolios._db() as db:
+        db.execute("BEGIN IMMEDIATE")
+        db.execute("""INSERT OR IGNORE INTO stage1_seven_card_reports
+          (owner,report_date,generated_kst,delayed,snapshot_json) VALUES(?,?,?,?,?)""",
+          (owner,report_date,stamp.isoformat(),int(delayed),json.dumps(snapshot,ensure_ascii=False)))
+        db.execute("COMMIT")
+    return {"status":"saved","report_date":report_date,
+            "generated_kst":stamp.isoformat(),"delayed":delayed}
+
+
+def list_saved_daily_cards(owner,portfolios,limit=30):
+    if type(limit) is not int or not 1<=limit<=100:
+        raise ValueError("invalid report limit")
+    with portfolios._db() as db:
+        db.execute("""CREATE TABLE IF NOT EXISTS stage1_seven_card_reports (
+          owner TEXT NOT NULL, report_date TEXT NOT NULL,
+          generated_kst TEXT NOT NULL, delayed INTEGER NOT NULL,
+          snapshot_json TEXT NOT NULL, PRIMARY KEY(owner,report_date)
+        )""")
+        rows=db.execute("""SELECT snapshot_json FROM stage1_seven_card_reports
+                           WHERE owner=? ORDER BY report_date DESC LIMIT ?""",(owner,limit)).fetchall()
+    return {"items":[json.loads(row[0]) for row in rows]}
