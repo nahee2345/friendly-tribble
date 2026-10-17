@@ -48,7 +48,7 @@ def last_30_days(market,symbol,*,now=None,opener=None):
                 "first_date":str(rows[0][0]),"first_close":str(first),
                 "last_close":str(last),"change_pct":round(float((last/first-1)*100),2),
                 "points":[{"date":str(d),"close":str(v)} for d,v in rows],
-                "source":"Yahoo Finance unofficial delayed daily closes",
+                "source":"Yahoo Finance unofficial delayed daily closes","source_url":url,
                 "notice":"지난 30여 일 실제 공개 종가 기준. 배당·세금·환율 변동 및 장중 가격은 제외."}
         except (OSError,KeyError,IndexError,TypeError,ValueError,InvalidOperation,TimeoutError,json.JSONDecodeError):
             continue
