@@ -46,7 +46,17 @@ def paper_run_once(owner, ledger, portfolios, preferences, *, today=None,
             raise ValueError
     except (ValueError, KeyError, TypeError):
         return {'status': 'skipped', 'traded': False, 'reason': '환율 검증 실패'}
-    cap = Decimal(state['initial_krw']) * Decimal('0.05')
+    # Reserve a minimum portion of this virtual account's actual cash.
+    # The retained amount is not available for another entry; no leverage.
+    from .stage1_decisions import reserve_ratio
+    weights_for_reserve = strategy_weights if strategy_weights is not None else {
+        'index':30, 'momentum':10}
+    reserve = Decimal(reserve_ratio(weights_for_reserve)) / Decimal(100)
+    available_krw = Decimal(default['krw_cash'])
+    available_usd = Decimal(default['usd_cash'])
+    gross_cash_value = available_krw + (available_usd * rate)
+    spendable = gross_cash_value * (Decimal(1) - reserve)
+    cap = min(Decimal(state['initial_krw']) * Decimal('0.05'), spendable)
     symbol = None
     price = None
     evidence = None
