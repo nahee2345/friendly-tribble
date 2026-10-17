@@ -7,6 +7,7 @@ type Performance={complete:boolean;contributions_krw:number;portfolio_value_krw:
 type Recommendation={symbol:string;name:string;region:string;kind:string;account:string;status:string;decision:string;priority_score:number;price:string|null;currency:string;quantity_suggestion:number;holding_horizon:string;exit_review:string;why:string[];risks:string[];as_of?:string;source?:string};
 type History={date:string;value_krw:string|null;contributed_krw:number;complete:boolean};
 type Hub={markets:Market[];performance:Performance;history:History[];accounts:{id:string;name:string;krw_cash:string;usd_cash:string;holdings:number}[];recommendations:Recommendation[];notice:string};
+type PriceTrend={status:string;symbol:string;market:string;change_pct?:number;first_date?:string;as_of?:string;points?:{date:string;close:string}[];source?:string;reason?:string};
 type News={title:string;url:string;market:string;symbols:string[];impact:string;reason:string;confidence:string;published_utc:string;source:string};
 type NewsReport={status:string;summary:{checked:number;related:number;risk_suspected:number};news:News[];risk_suspected:News[];coverage:string};
 type Security={market:string;symbol:string;name:string;kind:string;source:string;updated_at:string};
@@ -37,6 +38,7 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
   const [busy,setBusy]=useState(false);
   const [detail,setDetail]=useState<Recommendation|null>(null);
   const [slide,setSlide]=useState(0);
+  const [trend,setTrend]=useState<PriceTrend|null>(null);
   const [query,setQuery]=useState('');
   const [market,setMarket]=useState('ALL');
   const [kind,setKind]=useState('ALL');
@@ -62,13 +64,17 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
   const relevantNews=useMemo(()=>detail&&news?news.news.filter(n=>n.symbols.includes(detail.symbol)).slice(0,5):[],[detail,news]);
   const slides=detail?[
     {head:'투자 판단 요약',body:<><b>{detail.decision}</b><p>{detail.name} ({detail.symbol})</p><p>배정 계좌: {detail.account==='default'?'미국 일반':detail.account==='isa-base'?'ISA':'한국 일반'}</p><p>가격: {detail.price?(detail.currency==='USD'?'$':'₩')+fmt(detail.price,2):'미확인'} · 검토 수량 {detail.quantity_suggestion}주</p><p>판단 기준일: {detail.as_of??'없음'}</p></>},
-    {head:'추천 근거',body:<>{detail.why.map((w,i)=><p key={i}>{i+1}. {w}</p>)}<p>우선순위 {detail.priority_score}: 정책 비중과 상품 분류의 일치도입니다. 향후 수익 예측 점수가 아닙니다.</p></>},
+    {head:'최근 30일 가격·추천 근거',body:<>{trend?.status==='ok'?<p><b>실제 최근 30일 종가 변화: {trend.change_pct}%</b> · {trend.first_date} ~ {trend.as_of} · {trend.source}</p>:<p>최근 30일 검증 종가는 {trend?.reason??'조회 중 또는 미확인'}입니다.</p>}{detail.why.map((w,i)=><p key={i}>{i+1}. {w}</p>)}<p>우선순위 {detail.priority_score}: 정책 비중과 상품 분류의 일치도입니다. 향후 수익 예측 점수가 아닙니다.</p></>},
     {head:'반대 근거·위험',body:<>{detail.risks.map((w,i)=><p key={i}>{i+1}. {w}</p>)}<p>보유 비중과 시세 누락을 별도로 확인해야 합니다.</p></>},
     {head:'매도 검토 계획',body:<><p>보유기간 검토: {detail.holding_horizon}</p><p>{detail.exit_review}</p><p>확정 매도일·수익률이 아니라 조건부 재평가 계획입니다.</p></>},
     {head:'최근 30일 뉴스·출처',body:<>{relevantNews.length?relevantNews.map((n,i)=><p key={i}><b>{n.impact}</b> · <a href={n.url} target="_blank" rel="noreferrer">{n.title}</a><small> {n.published_utc.slice(0,10)} · {n.confidence}</small></p>):<p>관련성이 검증된 제목 매칭 뉴스가 없습니다. 호재·악재가 없다는 의미는 아닙니다.</p>}<p>가격 출처: {detail.source??'미확인'}</p></>}
   ]:[];
   async function refreshCatalog(){setBusy(true);try{await write('/api/v1/stage1/securities/refresh',{});setCatalog(await read<Catalog>('/api/v1/stage1/securities?'+new URLSearchParams({q:query,market,kind,limit:'50'})));}catch{setError('공개 종목 목록을 갱신하지 못했습니다.');}finally{setBusy(false);}}
   async function openSecurity(x:Security){setSelected(x);setSelectedQuote(null);const q=await read<typeof selectedQuote>('/api/v1/stage1/quote/'+encodeURIComponent(x.symbol)).catch(()=>null);setSelectedQuote(q);}
+  async function openRecommendation(x:Recommendation){setDetail(x);setSlide(0);setTrend(null);
+    const result=await read<PriceTrend>('/api/v1/stage1/last-30d/'+encodeURIComponent(x.symbol)).catch(()=>null);
+    setTrend(current=>current===null?result:current);
+  }
   return <div className="wh-wrap">
     <header className="wh-header"><div><b>WEALTHY</b><small>미국·한국 자동 모의투자 · 실시간 호가 아님</small></div>
       <nav><button className={tab==='home'?'on':''} onClick={()=>setTab('home')}>통합 대시보드</button>
@@ -98,7 +104,7 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
         {!news?.risk_suspected.length&&<p>현재 수집 범위에서 보유종목 관련 부정 제목을 확인하지 못했습니다.</p>}
         <small className="wh-caveat">뉴스가 손실을 확정한다는 뜻이 아닙니다. 서버 가동 중 확인 후 알림함에 저장됩니다.</small></section>
       <section className="wh-card wh-recs"><div className="wh-head"><b>자동 투자 검토 종목</b><small>누르면 추천 근거 카드뉴스</small></div><div className="wh-reclist">
-        {(hub?.recommendations??[]).slice(0,5).map(x=><button key={x.symbol} onClick={()=>{setDetail(x);setSlide(0);}}><b>{x.symbol}</b><span>{x.name}</span><em>{x.decision}</em><small>›</small></button>)}
+        {(hub?.recommendations??[]).slice(0,5).map(x=><button key={x.symbol} onClick={()=>void openRecommendation(x)}><b>{x.symbol}</b><span>{x.name}</span><em>{x.decision}</em><small>›</small></button>)}
       </div><small className="wh-caveat">현 단계 추천은 설정 비중과 상품 분류 중심입니다. 30일 뉴스 자체로 매수하지 않습니다.</small></section>
     </main>:<main className="wh-search"><div className="wh-searchbar"><div><h2>미국·한국 상장종목 검색</h2><p>공개 종목목록 캐시 · 가격은 선택 시 조회</p></div>
        <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="이름 또는 종목코드 (예: 삼성전자, AAPL)"/>
