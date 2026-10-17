@@ -110,7 +110,7 @@ def current_fx() -> dict:
         quote_date=datetime.strptime(data['date'],'%Y-%m-%d').date()
         age=(datetime.now(UTC).date()-quote_date).days
         if not rate.is_finite() or rate<=0 or not 0<=age<=5: raise ValueError('stale')
-        return {'status':'ok','usd_krw':format(rate,'f'),'as_of':str(quote_date),'age_days':age,'executable':False,'source':'Frankfurter / reference market rate'}
+        return {'status':'ok','usd_krw':format(rate,'f'),'as_of':str(quote_date),'age_days':age,'executable':False,'source':'Frankfurter / reference market rate','source_url':url}
     except (KeyError, TypeError, OSError, ValueError, json.JSONDecodeError, InvalidOperation):
         return {'status':'unavailable','executable':False}
 
