@@ -17,7 +17,7 @@ from contextlib import closing
 from datetime import datetime, date, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, parse_qs, unquote
 
 
 CATEGORIES = frozenset({"PRICE","HISTORY","FX","NEWS","FUNDAMENTALS","DIVIDENDS"})
@@ -106,6 +106,28 @@ def validated_snapshot(kind, symbol, provider, source_url, payload, *, now=None)
     if not isinstance(symbol,str) or not ALLOWED_SYMBOL.fullmatch(symbol):
         raise ValueError("invalid symbol")
     url=_url(source_url,provider)
+    link=urlsplit(url)
+    if kind in ("PRICE","HISTORY"):
+        if provider=="STOOQ":
+            query=parse_qs(link.query)
+            if (symbol.isdigit() or query.get("s")!=[symbol.lower()+".us"]
+                    or query.get("i")!=["d"]):
+                raise ValueError("Stooq source symbol/timeframe mismatch")
+        elif provider=="YAHOO_UNOFFICIAL":
+            terminal=unquote(link.path.rsplit("/",1)[-1]).upper()
+            choices=(symbol+".KS",symbol+".KQ") if symbol.isdigit() else (symbol,)
+            if terminal not in choices:
+                raise ValueError("Yahoo source symbol mismatch")
+    if kind=="FX":
+        query=parse_qs(link.query)
+        if query.get("base")!=["USD"] or query.get("symbols")!=["KRW"]:
+            raise ValueError("unverified FX source pair")
+    if kind=="DIVIDENDS":
+        query=parse_qs(link.query)
+        terminal=unquote(link.path.rsplit("/",1)[-1]).upper()
+        choices=(symbol+".KS",symbol+".KQ") if symbol.isdigit() else (symbol,)
+        if terminal not in choices or query.get("events")!=["div"]:
+            raise ValueError("unverified corporate action source")
     if not isinstance(payload,dict):
         raise ValueError("payload must be a mapping")
     if kind=="PRICE":
