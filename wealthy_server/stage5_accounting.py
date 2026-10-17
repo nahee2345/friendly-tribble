@@ -412,6 +412,9 @@ class AccountingEngine:
         cash_krw=Decimal(0);cash_usd=Decimal(0)
         fees={"known_reported":0,"unknown_trade_count":0,
               "trade_cost_records_unposted":0}
+        observed_costs={"KRW":{"fee":Decimal(0),"tax":Decimal(0)},
+                        "USD":{"fee":Decimal(0),"tax":Decimal(0)}}
+        observed_cost_receipts=[]
         all_trades=0
         acc_event_krw=sum((D(amount) for _,kind,amount,_,_,_
                            in cash_events if kind in ("deposit","virtual_fx")),Decimal(0))
@@ -433,6 +436,18 @@ class AccountingEngine:
                     fees["known_reported"]+=1
                 if meta.get("fee_amount") is not None or meta.get("tax_amount") is not None:
                     fees["trade_cost_records_unposted"]+=1
+                    denomination=meta.get("costs_currency")
+                    if denomination not in ("KRW","USD"):
+                        raise ValueError("recorded fee/tax without currency")
+                    fee=D(meta["fee_amount"]) if meta.get("fee_amount") is not None else None
+                    tax=D(meta["tax_amount"]) if meta.get("tax_amount") is not None else None
+                    if (fee is not None and fee<0) or (tax is not None and tax<0):
+                        raise ValueError("negative fee or withholding record")
+                    if fee is not None:observed_costs[denomination]["fee"]+=fee
+                    if tax is not None:observed_costs[denomination]["tax"]+=tax
+                    observed_cost_receipts.append({"order_key":order["id"],
+                        "account":ident,"currency":denomination,
+                        "fee":s(fee),"tax":s(tax),"cash_posted":False})
             krw=acc_event_krw if ident=="default" else Decimal(0)
             usd=acc_event_usd if ident=="default" else Decimal(0)
             for source,destination,amount in transfers:
@@ -616,6 +631,10 @@ class AccountingEngine:
                      "assumed_rate_each_side_pct":"0.1",
                      "illustrative_trade_fees_krw":s(fee_proxy),
                      "fee_records_and_history":fees,
+                     "recorded_unposted_native":{currency:{
+                         "fee":s(vals["fee"]),"tax":s(vals["tax"])}
+                         for currency,vals in observed_costs.items()},
+                     "recorded_trade_cost_receipts":observed_cost_receipts[:100],
                      "not_deducted_from_cash":True},
                 "cash_flows":cash_flows,
                 "ledger_sha256":ledger_hash,
