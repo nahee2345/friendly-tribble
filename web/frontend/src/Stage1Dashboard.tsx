@@ -222,7 +222,7 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
           {plan?.proposed_orders.length?plan.proposed_orders.map(x=><p key={x.request_id}>
             <b>{x.side} {x.symbol} {x.quantity}주</b> · {x.account} · ₩{fmt(x.notional_krw)}
             <small> · 정량 {x.strategy_score??'미평가'}점 / 충족률 {x.coverage_pct}%</small>
-            <text size="sm">{x.reason}</text>
+            <span className="wh-plan-explain">{x.reason}</span>
           </p>):<p>실행 가능한 계획이 없습니다. 데이터 부족·현금 유보 또는 목표 비중 충족일 수 있습니다.</p>}
           <h4>보유종목 위험 재검토</h4>
           {plan?.review.length?plan.review.slice(0,10).map((x,i)=><p key={i}>{x.symbol} · {x.reason}{x.approval_required?' (별도 승인 필수)':''}</p>):<p>자료 범위에서 추가 매도 재검토 사항 없음</p>}
