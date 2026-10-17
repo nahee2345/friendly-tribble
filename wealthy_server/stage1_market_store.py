@@ -71,9 +71,13 @@ def _money(value, *, ceiling=MAX_PRICE, min_positive=True) -> str:
 def _url(value, provider):
     if not isinstance(value,str) or not 8<=len(value)<=512:
         raise ValueError("missing source url")
-    info=urlsplit(value)
-    if (info.scheme!="https" or info.username or info.password or info.port
-            or (info.hostname or "").lower() not in DOMAINS[provider]):
+    try:
+        info=urlsplit(value)
+        allowed=(info.scheme=="https" and not info.username and not info.password
+                 and info.port is None and (info.hostname or "").lower() in DOMAINS[provider])
+    except ValueError:
+        allowed=False
+    if not allowed:
         raise ValueError("source is not an allowlisted provider")
     return value
 
@@ -147,8 +151,12 @@ def validated_snapshot(kind, symbol, provider, source_url, payload, *, now=None)
             when=item.get("published_utc")
             if not isinstance(title,str) or not 1<=len(title)<=300:
                 raise ValueError("invalid article title")
-            try:published=datetime.fromisoformat(when).astimezone(timezone.utc)
-            except (ValueError,TypeError,AttributeError):raise ValueError("invalid article date") from None
+            try:
+                published=datetime.fromisoformat(when)
+                if published.tzinfo is None:raise ValueError("naive publication time")
+                published=published.astimezone(timezone.utc)
+            except (ValueError,TypeError,AttributeError):
+                raise ValueError("invalid article date") from None
             if (published>now+timedelta(minutes=5) or
                     published<now-timedelta(days=30,minutes=5)):
                 raise ValueError("article outside 30-day window")
@@ -201,8 +209,15 @@ def validated_snapshot(kind, symbol, provider, source_url, payload, *, now=None)
             name=item.get("tag")
             if not isinstance(name,str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9]{0,80}",name):
                 raise ValueError("invalid SEC XBRL tag")
-            output.append({"tag":name,"value":_money(item.get("value"),
-                ceiling=Decimal("1000000000000000"),min_positive=False),
+            value=item.get("value")
+            if isinstance(value,bool) or value is None:raise ValueError("invalid SEC value")
+            try: numerical=Decimal(str(value))
+            except (TypeError,ValueError,InvalidOperation):
+                raise ValueError("invalid SEC value") from None
+            if (not numerical.is_finite() or abs(numerical)>Decimal("1000000000000000")
+                    or numerical.as_tuple().exponent < -6):
+                raise ValueError("invalid SEC magnitude")
+            output.append({"tag":name,"value":format(numerical,"f"),
                 "unit":item["unit"],"filed":filed,"period_end":period,
                 "form":item.get("form",""),"accession":item.get("accession","")})
         as_of=max(x["filed"] for x in output)
@@ -219,7 +234,7 @@ def validated_snapshot(kind, symbol, provider, source_url, payload, *, now=None)
             "source_url":url,"as_of":as_of,"currency":normalized.get("currency"),
             "quality":quality,"recorded_utc":now.isoformat(),"payload":normalized,
             "sha256":hashlib.sha256(packed.encode("utf-8")).hexdigest(),
-            "payload_json":packed}
+            "payload_json":packed,"raw_payload":payload}
 
 
 class MarketStore:
@@ -267,7 +282,7 @@ class MarketStore:
             raise ValueError("unvalidated snapshot")
         checked=validated_snapshot(snapshot["kind"],snapshot["symbol"],
                                    snapshot["provider"],snapshot["source_url"],
-                                   snapshot["payload"],now=datetime.fromisoformat(snapshot["recorded_utc"]))
+                                   snapshot["raw_payload"],now=datetime.fromisoformat(snapshot["recorded_utc"]))
         if checked["sha256"]!=snapshot.get("sha256"):
             raise ValueError("snapshot hash mismatch")
         with closing(self._db()) as db:
