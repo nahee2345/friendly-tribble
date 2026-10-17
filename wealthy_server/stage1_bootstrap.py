@@ -27,6 +27,8 @@ def initialize_paper_accounts(owner: str, ledger: Stage1Ledger, portfolios: Port
             db.execute(
                 "INSERT OR IGNORE INTO portfolios(owner,id,name,kind,created_at) "
                 "VALUES (?,?,?,?,CURRENT_TIMESTAMP)", (owner, ident, name, kind))
+        db.execute("UPDATE portfolios SET name='미국주식 가상계좌' "
+                   "WHERE owner=? AND id='default' AND name='기본 가상계좌'", (owner,))
         db.execute('COMMIT')
     # A stable transfer key per credited deposit makes restarts harmless.
     for event in state['events']:
