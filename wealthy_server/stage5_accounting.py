@@ -520,6 +520,15 @@ class AccountingEngine:
         else:
             twr={"status":"unavailable","pct":None,
                  "reason":"NAV_SNAPSHOT_INTEGRITY_FAILED"}
+        nav_history=[]
+        if history_valid:
+            for as_day,observed_at,amount,_,_,_ in reversed(nav_rows):
+                observed_time=stamp(observed_at)
+                prior_contributed=sum((D(v) for _,created,v in flows
+                     if stamp(created)<=observed_time),Decimal(0))
+                nav_history.append({"date":as_day,"value_krw":amount,
+                    "contributed_krw":float(prior_contributed),
+                    "complete":True,"verified_source_digest":True})
         outstanding=[{"account":account,"event":key,"category":category,
                       "amount":amount,"currency":currency,"status":status,
                       "cash_posted":False,"reference":reference}
@@ -567,6 +576,7 @@ class AccountingEngine:
                      "not_deducted_from_cash":True},
                 "cash_flows":cash_flows,
                 "ledger_sha256":ledger_hash,
+                "nav_history":nav_history,
                 "xirr":result_xirr,"twr":twr,
                 "tax_illustrations":tax,
                 "missing":problems,
