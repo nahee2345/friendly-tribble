@@ -122,7 +122,7 @@ def test_collect_cooldown_failures_do_not_replace_latest_good(tmp_path):
     assert store.latest("PRICE","AAPL",now=NOW+timedelta(hours=2))["status"]=="stale"
     assert store.latest("PRICE","AAPL")["tradeable"] is False
     attempts=store.health()["recent_attempts"]
-    assert attempts[0]["error_code"]=="SOURCE_OR_VALIDATION_FAILED"
+    assert attempts[0]["error_code"]=="SOURCE_OFFLINE"
 
 
 def test_bad_checksum_or_unauthorized_cache_path_is_denied(tmp_path):
