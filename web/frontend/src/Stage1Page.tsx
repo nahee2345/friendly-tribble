@@ -62,7 +62,7 @@ export function Stage1Page(){
     <section className="s1-panel">
       <div className="s1-panelhead"><h2>투자 판단 결과 · 먼저 보기</h2><button className="s1-outline" disabled={decisionBusy} onClick={()=>void refreshDecisions()}>{decisionBusy?'분석 중…':'결과 갱신'}</button></div>
       <p className="s1-desc">증권사 API 키 없이 공개 지연시세와 설정 비중·계좌 잔액으로 계산한 모의투자 제안입니다. 실제 수익이 가장 높은 종목을 보장하는 결과가 아닙니다.</p>
-      {decisionReport?<><div className="s1-balances"><div><small>제안 현금 유지 비중</small><strong>{decisionReport.reserve_percent}%</strong></div><div><small>목표 현금 유지액</small><strong>₩ {money(decisionReport.reserve_target_krw)}</strong></div><div><small>시세 활용 가능 종목</small><strong>{decisionReport.recommendations.filter(r=>r.status==='검토 가능').length}개</strong></div></div>
+      {decisionReport?<><div className="s1-balances"><div><small>제안 현금 유지 비중</small><strong>{decisionReport.reserve_percent}%</strong></div><div><small>현재 현금 기준 유보 목표</small><strong>₩ {money(decisionReport.reserve_target_krw)}</strong></div><div><small>시세 활용 가능 종목</small><strong>{decisionReport.recommendations.filter(r=>r.status==='검토 가능').length}개</strong></div></div>
       <div className="s1-candidates">{decisionReport.recommendations.slice(0,8).map(d=><article className="s1-candidate" key={d.symbol}><div className="s1-candidate-header"><h3>{d.symbol} · {d.name}</h3><b>{d.decision}</b></div>
           <p>계좌: {d.account==='default'?'미국 주식':d.account==='isa-base'?'ISA':'한국 주식'} · {d.price===null?'가격 미검증':(d.currency==='USD'?'<span>{auto?.enabled?'서버 실행 중':'검토 대기'}</span></div>
       <p className="s1-desc">서버 시작 시 1회, 이후 약 1시간마다 시세·환율을 확인합니다. 미국 ETF에 한해 하루 최대 1주, 최초 투자금의 5% 이내에서 가상 거래합니다. 시세가 없으면 거래하지 않습니다.</p>
