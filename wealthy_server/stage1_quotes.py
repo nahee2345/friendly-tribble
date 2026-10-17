@@ -10,7 +10,50 @@ from decimal import Decimal, InvalidOperation
 
 _PATTERN=re.compile(r'^[A-Z][A-Z0-9.]{0,11}$')
 
+def _kr_daily_close(symbol: str) -> dict:
+    """Unofficial Yahoo chart reference for KRX shares/ETFs; simulated only."""
+    import json
+    from datetime import datetime, timezone
+    from urllib.parse import quote as url_quote
+    for suffix in ('.KS', '.KQ'):
+        remote_symbol = symbol + suffix
+        url = ('https://query1.finance.yahoo.com/v8/finance/chart/'
+               +url_quote(remote_symbol)
+               +'?range=10d&interval=1d')
+        try:
+            req = urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0 WealthyPaperResearch'})
+            with urllib.request.urlopen(req, timeout=7) as response:
+                raw=response.read(250_001)
+            if len(raw)>250_000: raise ValueError('response oversized')
+            parsed=json.loads(raw)
+            item=parsed['chart']['result'][0]
+            meta=item['meta']
+            if meta.get('currency') != 'KRW' or meta.get('symbol','').upper() != remote_symbol:
+                raise ValueError('symbol or denomination mismatch')
+            timestamps=item['timestamp']
+            closes=item['indicators']['quote'][0]['close']
+            for ts,raw_price in reversed(list(zip(timestamps,closes))):
+                if raw_price is None: continue
+                price=Decimal(str(raw_price))
+                trade_date=datetime.fromtimestamp(int(ts), timezone.utc).date()
+                age=(datetime.now(timezone.utc).date()-trade_date).days
+                if not price.is_finite() or price<=0 or price>Decimal('1000000000') or not 0<=age<=4:
+                    raise ValueError('invalid daily close')
+                # Fractional API floats are not a reliable KRW tick quote.
+                price=price.quantize(Decimal('1'))
+                return {'status':'ok','tradeable':True,'symbol':symbol,
+                        'price':format(price,'f'),'currency':'KRW',
+                        'as_of':str(trade_date),'source':'Yahoo Finance public daily chart (unofficial)',
+                        'delay_notice':'공개 일간 종가 기반 모의 체결. 실시간 거래 호가 아님.'}
+        except (OSError,ValueError,KeyError,TypeError,IndexError,UnicodeError,
+                InvalidOperation,TimeoutError,json.JSONDecodeError):
+            continue
+    return {'status':'unavailable','tradeable':False,'symbol':symbol,
+            'reason':'KR_PRICE_UNVERIFIED'}
+
 def verified_quote(symbol:str)->dict:
+    if isinstance(symbol,str) and re.fullmatch(r'[0-9]{6}',symbol):
+        return _kr_daily_close(symbol)
     if not isinstance(symbol,str) or not _PATTERN.fullmatch(symbol):
         return {'status':'unavailable','tradeable':False,'reason':'INVALID_SYMBOL'}
     # Strict whitelist style URL construction; no arbitrary remote URL accepted.
