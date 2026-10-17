@@ -100,3 +100,33 @@ def test_daily_16_card_snapshot_is_idempotent_and_marks_late(tmp_path: Path):
     assert reports[0]["late_generation"] is True
     assert reports[0]["for_date"]=="2026-10-17"
     assert list_saved_daily_cards("other",p)["items"]==[]
+
+
+def test_approved_paper_order_is_filled_only_on_explicit_repeat(tmp_path: Path):
+    ledger,p,prefs,policy=environment(tmp_path)
+    req="approval-fulfillment-01"
+    request_approval("owner",p,request_id=req,account="kr-base",
+        symbol="069500",side="BUY",quantity=1,amount_krw=310000,
+        rationale="비용 검증 완료 후 별도 체결")
+    decide_approval("owner",p,req,True)
+    before=list_approvals("owner",p)["items"][0]
+    assert before["executed"] is False
+    assert not p.orders("owner","kr-base")["orders"]
+    quote={"status":"ok","tradeable":True,"symbol":"069500","currency":"KRW",
+           "price":"10000","source":"fixture","as_of":"2026-10-16"}
+    set_paused("owner",p,False,"approved paper execution")
+    p.trade("owner","kr-base","069500","BUY",1,req,quote)
+    after=list_approvals("owner",p)["items"][0]
+    assert after["executed"] is True
+
+
+def test_approved_paper_order_expires_after_24h(tmp_path: Path):
+    ledger,p,prefs,policy=environment(tmp_path)
+    req="approval-expiry-0001"
+    request_approval("owner",p,request_id=req,account="default",
+       symbol="VOO",side="BUY",quantity=1,amount_krw=310000,rationale="기간 확인")
+    decide_approval("owner",p,req,True)
+    with p._db() as db:
+        db.execute("UPDATE stage1_approvals SET expires_at='2020-01-01T00:00:00+00:00' WHERE owner=? AND request_id=?",
+                   ("owner",req))
+    assert list_approvals("owner",p)["items"][0]["status"]=="EXPIRED"
