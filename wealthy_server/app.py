@@ -497,6 +497,11 @@ def create_app(
             except (ValueError, KeyError, ArithmeticError):
                 raise _error(400, "PAPER_AUTO_REJECTED", "가상 자동주문 검증에 실패했습니다.") from None
 
+        @app.get("/api/v1/stage1/daily-reports")
+        def stage1_daily_reports(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
+            from .stage1_diary import list_daily_paper_reports
+            return list_daily_paper_reports(actor.owner_id, portfolio_store, limit=30)
+
         @app.get("/api/v1/stage1/performance")
         def stage1_performance(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
             from .stage1_valuation import portfolio_report
