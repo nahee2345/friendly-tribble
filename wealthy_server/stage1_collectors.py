@@ -138,11 +138,46 @@ def sec_facts(symbol,*,fetcher=None,contact=None):
                         valid.append((filed,ended,item,amount))
                 except (ValueError,InvalidOperation,TypeError):continue
             if valid:
-                last=max(valid,key=lambda x:(x[0],x[1]))
-                filed,end,item,amount=last
-                items.append({"tag":tag,"value":str(amount),"unit":unit,
-                              "filed":filed.isoformat(),"period_end":end.isoformat(),
-                              "form":item["form"],"accession":item.get("accn","")})
+                # Keep two comparable annual filings plus the latest quarterly
+                # observation. Report numbers may be restated; newest filed
+                # entry wins for each fiscal period, but old periods remain.
+                chosen={}
+                for filed,ended,item,amount in valid:
+                    form=item["form"]
+                    annual=form.startswith("10-K")
+                    start=item.get("start")
+                    duration=None
+                    if isinstance(start,str):
+                        try:duration=(ended-date.fromisoformat(start)).days
+                        except ValueError:continue
+                        if not 0<=duration<=400:continue
+                    # Revenue/earnings/cash-flow tags must be period flows,
+                    # not instant values accidentally read from amendments.
+                    flow=tag in ("NetIncomeLoss","Revenues",
+                          "RevenueFromContractWithCustomerExcludingAssessedTax",
+                          "OperatingIncomeLoss",
+                          "NetCashProvidedByUsedInOperatingActivities",
+                          "EarningsPerShareDiluted")
+                    if flow and (duration is None or
+                          (annual and not 280<=duration<=400) or
+                          (not annual and not 60<=duration<=110)):
+                        continue
+                    if not flow and duration is not None:
+                        continue
+                    key=("annual" if annual else "quarter",ended)
+                    previous=chosen.get(key)
+                    if previous is None or filed>previous[0]:
+                        chosen[key]=(filed,ended,item,amount)
+                annuals=sorted((v for (type_,_),v in chosen.items()
+                               if type_=="annual"),key=lambda x:x[1],reverse=True)[:2]
+                quarters=sorted((v for (type_,_),v in chosen.items()
+                                if type_=="quarter"),key=lambda x:x[1],reverse=True)[:1]
+                for filed,end,item,amount in annuals+quarters:
+                    items.append({"tag":tag,"value":str(amount),"unit":unit,
+                                  "filed":filed.isoformat(),
+                                  "period_start":item.get("start"),
+                                  "period_end":end.isoformat(),"form":item["form"],
+                                  "accession":item.get("accn","")})
         if not items:return {"status":"unavailable","reason":"SEC_NO_VALID_XBRL_FACTS"}
         return {"status":"ok","symbol":symbol,"facts":items,
                 "source_url":url,"source":"SEC EDGAR US GAAP Company Facts",
