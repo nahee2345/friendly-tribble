@@ -310,6 +310,13 @@ class MarketStore:
                 checked_utc TEXT NOT NULL,status TEXT NOT NULL,
                 error_code TEXT, retry_after_utc TEXT NOT NULL,
                 PRIMARY KEY(kind,symbol,provider))""")
+            # Immutable observations and mutable latest-verification pointer
+            # are separated: identical quotes can be re-verified without
+            # rewriting their original observed timestamp.
+            db.execute("""CREATE TABLE IF NOT EXISTS market_current(
+                kind TEXT NOT NULL,symbol TEXT NOT NULL,provider TEXT NOT NULL,
+                sha256 TEXT NOT NULL,confirmed_utc TEXT NOT NULL,
+                PRIMARY KEY(kind,symbol))""")
             return db
         except Exception:
             db.close()
@@ -333,6 +340,14 @@ class MarketStore:
                                                "as_of","currency","quality","recorded_utc",
                                                "sha256","payload_json")))
                 inserted=db.execute("SELECT changes()").fetchone()[0]==1
+                db.execute("""INSERT INTO market_current(kind,symbol,provider,sha256,confirmed_utc)
+                   VALUES(?,?,?,?,?)
+                   ON CONFLICT(kind,symbol) DO UPDATE SET
+                     provider=excluded.provider,sha256=excluded.sha256,
+                     confirmed_utc=excluded.confirmed_utc
+                   WHERE excluded.confirmed_utc>=market_current.confirmed_utc""",
+                   (checked["kind"],checked["symbol"],checked["provider"],
+                    checked["sha256"],checked["recorded_utc"]))
                 db.execute("COMMIT")
             except Exception:
                 db.execute("ROLLBACK")
@@ -372,19 +387,30 @@ class MarketStore:
         if kind not in CATEGORIES or not isinstance(symbol,str) or not ALLOWED_SYMBOL.fullmatch(symbol):
             raise ValueError("invalid cache lookup")
         with closing(self._db()) as db:
-            row=db.execute("""SELECT provider,source_url,as_of,currency,quality,
-                       recorded_utc,sha256,payload_json FROM market_snapshots
-                       WHERE kind=? AND symbol=? ORDER BY recorded_utc DESC LIMIT 1""",
-                       (kind,symbol)).fetchone()
+            row=db.execute("""SELECT s.provider,s.source_url,s.as_of,s.currency,s.quality,
+                    s.recorded_utc,s.sha256,s.payload_json,c.confirmed_utc
+                FROM market_current c JOIN market_snapshots s
+                  ON s.kind=c.kind AND s.symbol=c.symbol AND
+                     s.provider=c.provider AND s.sha256=c.sha256
+                WHERE c.kind=? AND c.symbol=?""",(kind,symbol)).fetchone()
+            if row is None:
+                # Compatibility for cache snapshots made before a current
+                # pointer existed. Never invent validation recency for them.
+                previous=db.execute("""SELECT provider,source_url,as_of,currency,
+                       quality,recorded_utc,sha256,payload_json
+                       FROM market_snapshots WHERE kind=? AND symbol=?
+                       ORDER BY recorded_utc DESC LIMIT 1""",(kind,symbol)).fetchone()
+                row=(*previous,previous[5]) if previous else None
         if row is None:return {"status":"unavailable","kind":kind,"symbol":symbol,"reason":"NO_VERIFIED_SNAPSHOT"}
-        provider,url,as_of,currency,quality,recorded_utc,digest,packed=row
-        age_seconds=max(0,(_aware(now)-datetime.fromisoformat(recorded_utc)).total_seconds())
+        provider,url,as_of,currency,quality,recorded_utc,digest,packed,confirmed_utc=row
+        age_seconds=max(0,(_aware(now)-datetime.fromisoformat(confirmed_utc)).total_seconds())
         # stale snapshots are DISPLAY-ONLY even when the original quote was
         # eligible for an order. Paper orders use fresh provider verification.
         return {"status":"ok" if age_seconds<=3600 else "stale",
                 "kind":kind,"symbol":symbol,"provider":provider,
                 "source_url":url,"as_of":as_of,"currency":currency,"quality":quality,
-                "recorded_utc":recorded_utc,"age_seconds":round(age_seconds,1),
+                "recorded_utc":recorded_utc,"last_verified_utc":confirmed_utc,
+                "age_seconds":round(age_seconds,1),
                 "sha256":digest,"data":json.loads(packed),
                 "tradeable":False,"use_for_paper_execution":False}
 
@@ -394,10 +420,12 @@ class MarketStore:
         with closing(self._db()) as db:
             snapshots=db.execute("""SELECT kind,COUNT(*) FROM market_snapshots
                                       GROUP BY kind ORDER BY kind""").fetchall()
+            current=db.execute("""SELECT kind,COUNT(*) FROM market_current
+                                   GROUP BY kind ORDER BY kind""").fetchall()
             failures=db.execute("""SELECT kind,symbol,provider,checked_utc,status,
                                     error_code,retry_after_utc FROM market_attempts
                                     ORDER BY checked_utc DESC LIMIT ?""",(limit,)).fetchall()
-        return {"snapshots":dict(snapshots),
+        return {"snapshots":dict(snapshots),"current_references":dict(current),
                 "recent_attempts":[dict(zip(("kind","symbol","provider","checked_utc",
                     "status","error_code","retry_after_utc"),r)) for r in failures],
                 "paper_order_eligible":False,
