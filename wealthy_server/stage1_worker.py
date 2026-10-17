@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 from .models import User
 from .stage1_bootstrap import initialize_paper_accounts
- from .stage1_diary import save_daily_paper_report
+from .stage1_diary import save_daily_paper_report
 from .stage1_strategy_policy import StrategyPolicy
 from .stage1_controls import status as trade_status
 from .stage1_daily_cards import store_daily_cards_after_16
