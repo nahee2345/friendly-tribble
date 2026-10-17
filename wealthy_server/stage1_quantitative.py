@@ -223,7 +223,7 @@ def _annual(facts,tag,now,unit="USD"):
                 duration=(end-date.fromisoformat(start)).days
                 if not 280<=duration<=400:continue
             value=_decimal(row.get("value"))
-            if value is None or not end<=filed<=now or (now-filed).days>550:
+            if value is None or not end<=filed<=now or (now-filed).days>1200:
                 continue
             previous=results.get(end)
             if previous is None or filed>previous[0]:
