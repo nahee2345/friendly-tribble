@@ -460,6 +460,15 @@ def create_app(
             from .stage1_research import account_eligibility
             return account_eligibility(instrument, market)
 
+        @app.post("/api/v1/stage1/auto-run")
+        def stage1_auto_run(actor: Actor = Depends(mutation_actor)) -> dict[str, Any]:
+            """A single explicitly requested simulated ETF investment; no brokerage."""
+            from .stage1_autorun import paper_run_once
+            try:
+                return paper_run_once(actor.owner_id, stage1, portfolio_store, preference_store)
+            except (ValueError, KeyError, ArithmeticError):
+                raise _error(400, "PAPER_AUTO_REJECTED", "가상 자동주문 검증에 실패했습니다.") from None
+
         @app.get("/api/v1/stage1/account")
         def stage1_account(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
             return stage1.state(actor.owner_id)
