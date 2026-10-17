@@ -193,7 +193,7 @@ class PortfolioEngine:
         prices={s:_price(observations[("PRICE",s)],s,now) for s in symbols}
         needs_usd=any(_decimal(a["usd_cash"])!=0 for a in accounts)
         needs_usd|=any(not h["symbol"].isdigit() for h in held)
-        if needs_usd and rate is None:
+        if (needs_usd or prefs["us_weight"]>0) and rate is None:
             missing.append("USD/KRW: 최신 확인된 환율 없음")
         cash_krw=Decimal(0)
         for account in accounts:
@@ -304,6 +304,9 @@ class PortfolioEngine:
                     "source_hash":observations[("PRICE",symbol)]["sha256"],
                     "coverage_pct":assessed_by.get(symbol,{}).get("coverage_pct",0),
                     "strategy_score":assessed_by.get(symbol,{}).get("score")})
+        # A risk-triggered exit suppresses all same-day BUY orders in that
+        # account (no immediate re-entry into a different fund or stock).
+        exit_accounts={order["account"] for order in orders if order["side"]=="SELL"}
         # One opportunity per target sleeve. Account cash is not silently
         # transferred; if account funding is insufficient, report a blocker.
         for market,kind in (("US","ETF"),("US","STOCK"),("KR","ETF"),("KR","STOCK")):
@@ -330,6 +333,7 @@ class PortfolioEngine:
                     ["isa-base","kr-base"] if kind=="ETF" and symbol in ISA_ETF_ALLOWED
                     else ["kr-base"])
                 for account_id in candidates_accounts:
+                    if account_id in exit_accounts:continue
                     account=account_map.get(account_id)
                     if not account:continue
                     available=_decimal(account["krw_cash"])+(
@@ -465,6 +469,15 @@ class PortfolioEngine:
                         claims.append({"request_id":key,"symbol":choice["symbol"],
                                        "status":"already_claimed","stored_status":before[0]})
                         continue
+                    if choice["side"]=="BUY":
+                        krw_cash,usd_cash,_,_=self.portfolios._money(db,owner,choice["account"])
+                        available=krw_cash+(usd_cash*rate if expected=="USD" else Decimal(0))
+                        ratio=Decimal(reserve_ratio(self.policy.get(owner)["weights"]))/100
+                        if actual>max(Decimal(0),available*(1-ratio)):
+                            db.execute("COMMIT")
+                            claims.append({"request_id":key,"symbol":choice["symbol"],
+                                           "status":"skipped","reason":"CASH_RESERVE_OR_BALANCE_CHANGED"})
+                            continue
                     # Check all same-date executed BUY amounts, not just this
                     # iteration, so two browser/worker runs cannot bypass the
                     # portfolio-wide daily spend cap.
