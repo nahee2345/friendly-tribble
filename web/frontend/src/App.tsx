@@ -94,7 +94,7 @@ function Shell({ theme, setTheme }: { theme: Theme; setTheme: (value: Theme) => 
       <main id="main-content" tabIndex={-1}>
         <Routes>
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/dashboard" element={<Stage1Page />} />
           <Route path="/stage1" element={<Stage1Page />} />
           <Route path="/assets" element={<AssetsPage />} />
           <Route path="/accounts" element={<AccountsPage />} />
