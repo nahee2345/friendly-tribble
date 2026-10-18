@@ -22,6 +22,23 @@ from .stage1_inbox import _schema as inbox_schema
 from .stage1_decisions import proposal
 from .stage1_strategy_policy import StrategyPolicy
 
+# Historical scholarly classifications, NOT a claim that every article shares a viewpoint.
+_EDITORIAL_STUDY="https://www.kci.go.kr/kciportal/ci/sereArticleSearch/ciSereArtiView.kci?sereArticleSearchBean.artiId=ART001533645"
+_EDITORIAL_STUDY_2="https://www.kci.go.kr/kciportal/ci/sereArticleSearch/ciSereArtiView.kci?sereArticleSearchBean.artiId=ART001372728"
+_EDITORIAL_OUTLETS=(
+    (("조선일보","chosun ilbo"),"보수 성향으로 분류된 연구 있음",_EDITORIAL_STUDY),
+    (("동아일보","donga ilbo","dong-a ilbo"),"보수 성향으로 분류된 연구 있음",_EDITORIAL_STUDY),
+    (("중앙일보","joongang ilbo"),"보수 성향으로 분류된 연구 있음",_EDITORIAL_STUDY_2),
+    (("한겨레","hankyoreh"),"진보 성향으로 분류된 연구 있음",_EDITORIAL_STUDY),
+    (("경향신문","kyunghyang"),"진보 성향으로 분류된 연구 있음",_EDITORIAL_STUDY),
+)
+def _editorial_context(publisher):
+    key=publisher.strip().casefold()
+    for names,label,source in _EDITORIAL_OUTLETS:
+        if key in names:
+            return label,source
+    return "평가 근거 미확인",None
+
 INDEXES=(("KOSPI","^KS11"),("KOSDAQ","^KQ11"),
          ("S&P 500","^GSPC"),("NASDAQ","^IXIC"))
 
@@ -104,9 +121,11 @@ def _fetch_rss(query,market,language):
         pub=(row.findtext("pubDate") or "").strip()
         if title and link.startswith("https://news.google.com/") and pub:
             publisher=(row.findtext("source") or "").strip()[:100] or "언론사 미확인"
+            editorial,source_url=_editorial_context(publisher) if market=="KR" else ("해당 없음",None)
             items.append({"title":title,"url":link,"published":pub,"source":"Google News RSS",
-                          "publisher":publisher,"editorial_lean":"평가 자료 없음",
-                          "editorial_basis":"언론사 정치 성향은 기사 제목으로 판단하지 않습니다."})
+                          "publisher":publisher,"editorial_lean":editorial,
+                          "editorial_source":source_url,
+                          "editorial_basis":"과거 연구의 매체별 분류로, 현재 해당 기사나 언론사의 고정된 정치색을 증명하지 않습니다."})
     return items
 
 def _classify(item,holdings):
