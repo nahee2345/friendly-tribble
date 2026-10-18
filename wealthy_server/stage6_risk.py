@@ -32,7 +32,7 @@ RISK_DRAWDOWN_LIMIT=-30.0
 RISK_CONCENTRATION_WARN=25.0
 CORRELATION_WARN=0.90
 # Curated index *identity hints*, NOT confirmed constituents/percentage overlap.
-INDEX_IDENTITY={"VOO":"US_SP500","360750":"US_SP500",
+INDEX_IDENTITY={"VOO":"US_SP500","SPYM":"US_SP500","360750":"US_SP500",
                 "VTI":"US_TOTAL","069500":"KR_KOSPI200",
                 "QQQM":"US_NASDAQ100","SCHD":"US_DIVIDEND",
                 "VXUS":"NON_US_EQUITY"}
