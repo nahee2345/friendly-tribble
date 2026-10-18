@@ -37,6 +37,7 @@ def test_kr_etf(tmp_path):
 @pytest.mark.parametrize("bad",[
     "symbol,name,kind\nAAPL,Apple,STOCK\nAAPL,Duplicate,ETF\n",
     "symbol,name,kind\nAAPL,Apple,STOCK\nINVALID$,Invalid,ETF\n",
+    "symbol,name,kind\nAAPL,Apple,STOCK\nBAD\\\\CODE,Invalid,STOCK\n",
     "symbol,name,kind\nAAPL,Apple,STOCK\nMSFT,Microsoft,UNKNOWN\n",
     "symbol,name,kind\n",
     "symbol,name,kind\nAAPL,Apple,STOCK,EXTRA\n",
