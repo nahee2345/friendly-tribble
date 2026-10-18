@@ -136,7 +136,29 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
       {detail.risks.map((w,i)=><p key={i}>기초 판단: {w}</p>)}
       {activeQuant?.unknown_reasons.slice(0,5).map((w,i)=><p key={'miss'+i}><small>자료 부족: {w}</small></p>)}
       <p>자료 누락과 지연 종가의 위험은 별도 확인이 필요합니다.</p></>},
-    {head:'매도 검토 계획',body:<><p>보유기간 검토: {detail.holding_horizon}</p><p>{detail.exit_review}</p><p>확정 매도일·수익률이 아니라 조건부 재평가 계획입니다.</p></>},
+    {head:'6단계 위험·매도 재검토',body:<>
+      <p>보유기간 검토: {detail.holding_horizon}</p><p>{detail.exit_review}</p>
+      <p><b>신규 매수 위험평가:</b> {selectedSymbolRisk?.candidate?.guard.reason??'과거 시세 검증 대기'}</p>
+      {selectedSymbolRisk?.candidate?.risk?<p>최근 63거래일 연환산 변동성 {selectedSymbolRisk.candidate.risk.annualized_volatility_pct}%
+        · 최대낙폭 {selectedSymbolRisk.candidate.risk.max_drawdown_pct}%
+        · 하위 5% 일간 수익률 {selectedSymbolRisk.candidate.risk.historical_5pct_daily_return_pct}%</p>:
+        <p>검증된 65개 이상 종가가 없어 위험 수치를 임의로 생성하지 않았습니다.</p>}
+      <p>확정 매도일이나 미래 수익 예측이 아닙니다. 위험 신호만으로 자동매도하지 않습니다.</p>
+    </>},
+    {head:'고정 모멘텀 규칙 · 30거래일 과거 재현',body:<>
+      {selectedSymbolRisk?.candidate?.momentum_replay.status==='historical_replay'?<>
+        <p>20일/60일 이동평균 규칙: {selectedSymbolRisk.candidate.momentum_replay.period_start} ~ {selectedSymbolRisk.candidate.momentum_replay.period_end}</p>
+        <p>규칙 재현 {fmt(selectedSymbolRisk.candidate.momentum_replay.strategy_return_pct,2)}%
+          · 같은 기간 단순 보유 {fmt(selectedSymbolRisk.candidate.momentum_replay.buy_hold_return_pct,2)}%</p>
+        <p>전략 낙폭 {fmt(selectedSymbolRisk.candidate.momentum_replay.strategy_max_drawdown_pct,2)}%
+          · 가정 거래비용 {selectedSymbolRisk.candidate.momentum_replay.friction_each_switch_pct}%/전환
+          · 전환 {selectedSymbolRisk.candidate.momentum_replay.switches}회</p>
+        {selectedSymbolRisk.candidate.momentum_replay.limitations?.map((x,i)=><p key={i}>{x}</p>)}
+      </>:<p>미산정: {selectedSymbolRisk?.candidate?.momentum_replay.reason??'최소 95개 종가 필요'}</p>}
+      <p>미래 수익 예측이나 실제 보유계좌 백테스트가 아닙니다. 8전략 전체 성과 검증은 자료 부족으로 보류합니다.</p>
+      {selectedSymbolRisk?.candidate?.source&&<p><a href={selectedSymbolRisk.candidate.source.url} target="_blank" rel="noreferrer">
+        검증된 과거 종가 원본 ↗</a></p>}
+    </>},
     {head:'정량 분석 원본·기준일',body:<>
       <p>계산에 사용된 검증된 공개 자료만 표시합니다.</p>
       {activeQuant?.source_evidence.length?activeQuant.source_evidence.map((x,i)=><p key={i}>
@@ -227,6 +249,16 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
            <p>종합점수: {selectedAssessment?.score??'자료 부족'} · 충족률 {selectedAssessment?.coverage_pct??'–'}% · {selectedAssessment?.recommendation??'조회 중'}</p>
            {Object.entries(strategyLabels).map(([code,label])=><p key={code}>{label}: {selectedAssessment?.strategies[code]?.score??'미평가'}
              {selectedAssessment?.strategies[code]?.status!=='scored'&&<small> · {selectedAssessment?.strategies[code]?.reason??'자료 부족'}</small>}</p>)}
+           <p><b>6단계 위험:</b> {selectedSymbolRisk?.candidate?.risk?
+              ('변동성 '+selectedSymbolRisk.candidate.risk.annualized_volatility_pct+
+              '% · 낙폭 '+selectedSymbolRisk.candidate.risk.max_drawdown_pct+'%'):
+              selectedSymbolRisk?.candidate?.guard.reason??'검증 대기'}</p>
+           <p>모멘텀 30거래일 재현: {selectedSymbolRisk?.candidate?.momentum_replay.status==='historical_replay'?
+             '규칙 '+fmt(selectedSymbolRisk.candidate.momentum_replay.strategy_return_pct,2)+
+             '% / 단순보유 '+fmt(selectedSymbolRisk.candidate.momentum_replay.buy_hold_return_pct,2)+'%':
+             '자료 부족'}</p>
+           {selectedSymbolRisk?.candidate?.source&&<p><a href={selectedSymbolRisk.candidate.source.url} target="_blank" rel="noreferrer">
+             위험 계산 종가 출처 ↗</a></p>}
            <small>검증된 캐시 자료로만 계산합니다. 연구 점수는 주문을 승인하지 않습니다.</small>
          </div>
          <p>종목 검색은 자동매수 승인과 다릅니다. 검증되지 않은 데이터는 체결에 사용하지 않습니다.</p></>:<p>왼쪽에서 종목을 선택해 주세요.</p>}
