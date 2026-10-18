@@ -553,6 +553,51 @@ def create_app(
             kind: str
             symbol: str
 
+        @app.get("/api/v1/stage1/stage8-simulation")
+        def stage8_sample_paper_investment(
+                actor: Actor = Depends(current_actor)) -> dict[str, Any]:
+            """400만원 sandbox replay, actual owner cash shown separately.
+
+            This one-time illustrative test uses fabricated historical closes
+            on a throwaway SQLite database, never a user's ledger or brokers.
+            The authenticated owner's initial deposit is created by the
+            normal idempotent Stage1 bootstrap, with no fictitious fill.
+            """
+            from .stage8_sandbox import sandbox_preview
+            initialize_paper_accounts(actor.owner_id,stage1,portfolio_store)
+            accounts=portfolio_store.list(actor.owner_id)["accounts"]
+            with portfolio_store._db() as db:
+                row=db.execute("""SELECT amount_krw FROM stage1_events
+                    WHERE owner=? AND event_key='initial' AND kind='deposit'""",
+                    (actor.owner_id,)).fetchone()
+            funded=bool(row and row[0]==4000000)
+            cash=sum(Decimal(a["krw_cash"]) for a in accounts)
+            holdings=sum(len(a["holdings"]) for a in accounts)
+            usd=sum(Decimal(a["usd_cash"]) for a in accounts)
+            try:
+                sandbox=sandbox_preview()
+                status="ready"
+            except (ValueError,KeyError,ArithmeticError,AssertionError) as error:
+                # A failing algorithm must NOT be represented as a successful
+                # investment or replaced by hand-written example orders.
+                status="sandbox_failed"
+                sandbox={"status":"unavailable","error_class":type(error).__name__,
+                         "orders":[],"active_user_ledger_touched":False}
+            return {"status":status,"mode":"SANDBOX_FIXTURE_SEPARATE",
+                "actual_owner":{"initial_4000000_recorded":funded,
+                    "cash_krw":str(cash),"cash_usd":str(usd),
+                    "holdings_count":holdings,
+                    "accounts":[{"id":a["id"],"name":a["name"],
+                                 "krw_cash":a["krw_cash"],
+                                 "usd_cash":a["usd_cash"],
+                                 "holdings_count":len(a["holdings"])}
+                                for a in accounts],
+                    "cash_only_total_krw":str(cash) if holdings==0 and usd==0 else None,
+                    "valuation_notice":"현금만 보유하고 달러현금이 없을 때만 원화 현금을 확정 총액으로 표시합니다. 보유 종목의 평가가 필요하면 가격 미확정으로 둡니다."},
+                "scenario":sandbox,
+                "not_actual_orders":True,"no_user_trades_added":True,
+                "market_news_not_synthesized":True}
+
         @app.get("/api/v1/stage1/risk-review")
         def stage6_risk_overview(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
             """Owner-scoped evidence-only volatility and portfolio risk."""
