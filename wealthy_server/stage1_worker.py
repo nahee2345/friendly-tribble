@@ -26,13 +26,14 @@ log = logging.getLogger("wealthy.paper.worker")
 class PaperWorker:
     def __init__(self, database, ledger, portfolios, preferences, interval=3600,
                  market_collector=None, portfolio_engine=None,
-                 accounting_engine=None):
+                 accounting_engine=None,risk_engine=None):
         self.database, self.ledger = database, ledger
         self.portfolios, self.preferences = portfolios, preferences
         self.interval = max(3600, interval)
         self.market_collector = market_collector
         self.portfolio_engine = portfolio_engine
         self.accounting_engine = accounting_engine
+        self.risk_engine = risk_engine
         self.stop_signal = Event()
         self.thread = None
         self.last_result = {'status': 'waiting', 'reason': '첫 검토 대기'}
@@ -70,6 +71,15 @@ class PaperWorker:
                          len(data_result["attempts"]))
             except Exception:
                 log.warning("Stage2 market-cache refresh deferred",exc_info=True)
+        # Source-linked historical downside alerts are distinct from
+        # headline-based news signals, remain owner scoped and deduplicate
+        # by risk rule + verified data SHA across worker restarts.
+        if self.risk_engine is not None:
+            try:
+                result=self.risk_engine.publish_alerts(owner)
+                log.info("Stage6 risk alerts: %s new",result["new_alerts"])
+            except Exception:
+                log.warning("Stage6 historical risk alert deferred",exc_info=True)
         # A daily NAV is sampled only after 16:00 KST and only if all held
         # instruments pass Stage2 source verification. A cash-only book is
         # valid without FX when no USD cash or securities are held.
