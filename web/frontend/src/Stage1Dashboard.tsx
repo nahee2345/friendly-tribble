@@ -175,8 +175,7 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
           <span>총손익(세전) {accounting?.valuation_complete?'₩'+fmt(accounting.gross_change_after_contributions_krw):
             hub?.performance.complete?'₩'+fmt(hub.performance.return_krw):'미확정'}</span>
           <span>XIRR {accounting?.xirr.status==='ok'?fmt(accounting.xirr.pct,2)+'%':'미확정'}</span></div>
-        <div className="wh-chart"><AssetGraph data={accounting?.nav_history&&accounting.nav_history.length>=2?
-           accounting.nav_history:hub?.history??[]}/></div><div className="wh-legend"><span>━ 평가자산</span><span>┄ 누적 입금원금</span></div></section>
+        <div className="wh-chart"><AssetGraph data={accounting?.nav_history??[]}/></div><div className="wh-legend"><span>━ 평가자산</span><span>┄ 누적 입금원금</span></div></section>
       <section className="wh-card wh-accounts"><div className="wh-head"><b>가상계좌</b><small>미국 · 한국 · ISA</small></div>
         {(hub?.accounts??[]).map(a=><div className="wh-account" key={a.id}><b>{a.id==='default'?'미국 일반':a.id==='kr-base'?'한국 일반':a.id==='isa-base'?'ISA':a.name}</b><span>₩{fmt(a.krw_cash)} · ${fmt(a.usd_cash,2)}</span><small>보유 {a.holdings}종</small></div>)}
         {!hub&&<p>자산 원장 확인 중</p>}</section>
