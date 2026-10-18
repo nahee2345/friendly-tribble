@@ -261,7 +261,15 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
             <em>{q?.score!==null&&q?.score!==undefined?q.score+'점 · '+q.coverage_pct+'% 충족':q?'자료 부족 · '+q.coverage_pct+'%':'평가 대기'}</em>
             <small>{q?.recommendation??'기초 후보'} ›</small></button>;
         })}
-      </div><small className="wh-caveat">정량 평가는 저장된 검증자료만 사용하며, 모의주문과 분리된 읽기 전용 연구 결과입니다.</small></section>
+        {!rankedRecommendations.length&&sandbox&&sandbox.weekday_replay.orders.map(o=>
+          <button key={'stage8-'+o.symbol} onClick={()=>setShowStage8(true)}
+            title="합성가격을 사용한 독립 시험용 종목이며 실제 매수 권유가 아닙니다.">
+            <b>{o.symbol}</b><span>가정 모의투자 예시</span>
+            <em>{o.strategy_score??'–'}점 · {o.coverage_pct??'–'}% 시험 충족</em>
+            <small>실제 추천 아님 · 근거 ›</small>
+          </button>)}
+      </div><small className="wh-caveat">{!rankedRecommendations.length&&sandbox?
+          '검증용 합성 시세 예시이며 실제 투자·추천이 아닙니다.':'정량 평가는 저장된 검증자료만 사용하며, 주문과 분리된 읽기 전용 연구입니다.'}</small></section>
     </main>:<main className="wh-search"><div className="wh-searchbar"><div><h2>미국·한국 상장종목 검색</h2><p>공개 종목목록 캐시 · 가격은 선택 시 조회</p></div>
        <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="이름 또는 종목코드 (예: 삼성전자, AAPL)"/>
        <select value={market} onChange={e=>setMarket(e.target.value)}><option value="ALL">전체 시장</option><option value="KR">한국</option><option value="US">미국</option></select>
