@@ -79,19 +79,22 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
   const [showReferences,setShowReferences]=useState(false);
   async function loadHome(){
     setBusy(true);setError('');
+    // Owner cash and sandbox explanation must be visible even when an
+    // external quote/news provider stalls one of the expensive report APIs.
+    void read<Stage8Result>('/api/v1/stage1/stage8-simulation')
+      .then(setStage8).catch(()=>setStage8(null));
     const results=await Promise.allSettled([read<Hub>('/api/v1/stage1/hub'),read<NewsReport>('/api/v1/stage1/news-30d'),
       read<QuantBatch>('/api/v1/stage1/quantitative'),
       read<PaperPlan>('/api/v1/stage1/portfolio-plan'),
       read<Stage5Accounting>('/api/v1/stage1/accounting'),
-      read<RiskReport>('/api/v1/stage1/risk-review'),
-      read<Stage8Result>('/api/v1/stage1/stage8-simulation')]);
+      read<RiskReport>('/api/v1/stage1/risk-review')]);
     if(results[0].status==='fulfilled')setHub(results[0].value);else setError('시장·자산 평가를 확인하지 못했습니다. 서버와 가격 공급원을 확인하세요.');
     if(results[1].status==='fulfilled')setNews(results[1].value);
     if(results[2].status==='fulfilled')setQuant(results[2].value);else setQuant(null);
     if(results[3].status==='fulfilled')setPlan(results[3].value);else setPlan(null);
     if(results[4].status==='fulfilled')setAccounting(results[4].value);else setAccounting(null);
     if(results[5].status==='fulfilled')setRiskReview(results[5].value);else setRiskReview(null);
-    if(results[6].status==='fulfilled')setStage8(results[6].value);else setStage8(null);
+
     const inbox=await read<{items:{event_id:string;read_at:string|null}[]}>('/api/v1/stage1/inbox').catch(()=>null);
     if(inbox)setRiskUnread(inbox.items.filter(x=>x.event_id.startsWith('risk:')&&!x.read_at).length);
     const reference=await read<ReferenceHealth>('/api/v1/stage1/reference/health').catch(()=>null);
