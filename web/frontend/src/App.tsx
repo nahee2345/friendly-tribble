@@ -101,7 +101,7 @@ function Shell({ theme, setTheme }: { theme: Theme; setTheme: (value: Theme) => 
           <Route path="/strategy-library" element={<StrategyLibraryPage />} />
           <Route path="/strategies/:strategyId" element={<StrategyDetailPage />} />
           <Route path="/search" element={<SearchPage />} />
-          <Route path="/analysis" element={<AnalysisPage />} />
+          <Route path="/analysis" element={<Stage1Page />} />
           <Route path="/tax" element={<TaxPage />} />
           <Route path="/dividends" element={<DividendPage />} />
           <Route path="/market" element={<MarketPage />} />
