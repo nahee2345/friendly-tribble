@@ -19,6 +19,7 @@ from .stage1_research import current_fx
 # Manually characterized exposures, not financial signals. Codes are maintained.
 CATALOG = (
     ("VOO", "Vanguard S&P500", "US", "ETF", ("index","asset_allocation"), "미국 대형주"),
+    ("SPYM", "State Street SPDR Portfolio S&P 500", "US", "ETF", ("index","asset_allocation"), "미국 대형주 S&P 500, 상대적으로 낮은 주당 가격. 실제 체결 가능 여부·총보수 별도 검증"),
     ("VTI", "Vanguard Total Market", "US", "ETF", ("index","asset_allocation"), "미국 주식시장 전체"),
     ("QQQM", "Invesco Nasdaq 100", "US", "ETF", ("growth","momentum"), "미국 대형 성장주"),
     ("SCHD", "Schwab Dividend", "US", "ETF", ("high_dividend","dividend_growth"), "미국 배당주"),
