@@ -286,7 +286,7 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
        <select value={market} onChange={e=>{setMarket(e.target.value);setCatalogOffset(0);}}><option value="ALL">전체 시장</option><option value="KR">한국</option><option value="US">미국</option></select>
        <select value={kind} onChange={e=>{setKind(e.target.value);setCatalogOffset(0);}}><option value="ALL">전체 상품</option><option value="STOCK">개별주</option><option value="ETF">ETF</option></select>
        <button disabled={busy} onClick={()=>void refreshCatalog()}>전체 목록 갱신</button></div>
-       <div className="wh-catalog"><div className="wh-searchresults"><div className="wh-head"><b>검색 결과 {fmt(catalog?.total)}개</b><small>한 번에 최대 50종목</small></div>
+       <div className="wh-catalog"><div className="wh-searchresults"><div className="wh-head"><b>검색 결과 {fmt(catalog?.total)}개</b><small>미국 {catalog?.catalog_status?.US?.download_rows??'미확인'}개 · 한국 {catalog?.catalog_status?.KR?.download_rows??'미확인'}개 수집 기록 · 최대 50개/페이지</small></div>
          <button disabled={busy} onClick={()=>{setScreen(null);void read<{screened:number;ready:number;items:{symbol:string;status:string;score:number|null;coverage_pct:number}[]}>('/api/v1/stage1/screen?'+new URLSearchParams({q:query,market,kind,limit:'20'})).then(setScreen).catch(()=>setError('정량 검색 결과를 확인할 수 없습니다.'));}}>현재 검색조건 상위 20개 정량 평가</button>
          {screen&&<div role="status"><b>평가 {screen.screened}종 · 분석 가능 {screen.ready}종</b><small>미확인 전략은 점수를 임의로 채우지 않습니다. 자동매매와 분리된 참고 정보입니다.</small>
            {screen.items.map(x=><p key={x.symbol}>{x.symbol} · {x.score===null?'자료 부족':x.score+'점'} · 충족률 {x.coverage_pct??0}%</p>)}</div>}
