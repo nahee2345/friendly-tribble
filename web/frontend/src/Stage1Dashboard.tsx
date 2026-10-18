@@ -60,6 +60,7 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
   const [query,setQuery]=useState('');
   const [market,setMarket]=useState('ALL');
   const [kind,setKind]=useState('ALL');
+  const [catalogOffset,setCatalogOffset]=useState(0);
   const [catalog,setCatalog]=useState<Catalog|null>(null);
   const [screen,setScreen]=useState<{screened:number;ready:number;items:{symbol:string;status:string;score:number|null;coverage_pct:number}[]}|null>(null);
   const [selected,setSelected]=useState<Security|null>(null);
@@ -104,10 +105,10 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
   }
   useEffect(()=>{void loadHome();const interval=setInterval(()=>void loadHome(),300_000);return()=>clearInterval(interval);},[]);
   useEffect(()=>{if(tab!=='search')return;let active=true;
-    const delay=setTimeout(()=>{read<Catalog>('/api/v1/stage1/securities?'+new URLSearchParams({q:query,market,kind,limit:'50'}))
+    const delay=setTimeout(()=>{read<Catalog>('/api/v1/stage1/securities?'+new URLSearchParams({q:query,market,kind,limit:'50',offset:String(catalogOffset)}))
       .then(r=>{if(active)setCatalog(r);}).catch(()=>{if(active)setError('종목목록 검색에 실패했습니다.');});},280);
     return()=>{active=false;clearTimeout(delay);};
-  },[tab,query,market,kind]);
+  },[tab,query,market,kind,catalogOffset]);
   const relevantNews=useMemo(()=>detail&&news?news.news.filter(n=>n.symbols.includes(detail.symbol)).slice(0,5):[],[detail,news]);
   const activeQuant=useMemo(()=>detail?quant?.items.find(x=>x.symbol===detail.symbol)??null:null,[detail,quant]);
   const sandbox=stage8?.status==='ready'&&stage8.scenario.status==='completed_sandbox_only'
@@ -274,17 +275,29 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
           </button>)}
       </div><small className="wh-caveat">{!rankedRecommendations.length&&sandbox?
           '검증용 합성 시세 예시이며 실제 투자·추천이 아닙니다.':'정량 평가는 저장된 검증자료만 사용하며, 주문과 분리된 읽기 전용 연구입니다.'}</small></section>
-    </main>:<main className="wh-search"><div className="wh-searchbar"><div><h2>미국·한국 상장종목 검색</h2><p>공개 종목목록 캐시 · 가격은 선택 시 조회</p></div>
-       <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="이름 또는 종목코드 (예: 삼성전자, AAPL)"/>
-       <select value={market} onChange={e=>setMarket(e.target.value)}><option value="ALL">전체 시장</option><option value="KR">한국</option><option value="US">미국</option></select>
-       <select value={kind} onChange={e=>setKind(e.target.value)}><option value="ALL">전체 상품</option><option value="STOCK">개별주</option><option value="ETF">ETF</option></select>
+    </main>:<main className="wh-search"><div className="wh-searchbar"><div><h2>미국·한국 주식·ETF 검색</h2><p>공개 상장목록 기반 검색 · 시세와 매매 적격성은 별도 확인</p></div>
+       <nav aria-label="종목 시장별 빠른 선택" style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+         {([['US','STOCK','미국 주식'],['KR','STOCK','한국 주식'],['ALL','ETF','미국·한국 ETF'],['ALL','ALL','모든 종목']] as const).map(([m,k,label])=>
+           <button key={label} type="button" aria-pressed={market===m&&kind===k}
+             onClick={()=>{setMarket(m);setKind(k);setCatalogOffset(0);setScreen(null);setSelected(null);}}>
+             {label}</button>)}
+       </nav>
+       <input value={query} onChange={e=>{setQuery(e.target.value);setCatalogOffset(0);}} placeholder="이름 또는 종목코드 (예: 삼성전자, AAPL)"/>
+       <select value={market} onChange={e=>{setMarket(e.target.value);setCatalogOffset(0);}}><option value="ALL">전체 시장</option><option value="KR">한국</option><option value="US">미국</option></select>
+       <select value={kind} onChange={e=>{setKind(e.target.value);setCatalogOffset(0);}}><option value="ALL">전체 상품</option><option value="STOCK">개별주</option><option value="ETF">ETF</option></select>
        <button disabled={busy} onClick={()=>void refreshCatalog()}>전체 목록 갱신</button></div>
        <div className="wh-catalog"><div className="wh-searchresults"><div className="wh-head"><b>검색 결과 {fmt(catalog?.total)}개</b><small>한 번에 최대 50종목</small></div>
          <button disabled={busy} onClick={()=>{setScreen(null);void read<{screened:number;ready:number;items:{symbol:string;status:string;score:number|null;coverage_pct:number}[]}>('/api/v1/stage1/screen?'+new URLSearchParams({q:query,market,kind,limit:'20'})).then(setScreen).catch(()=>setError('정량 검색 결과를 확인할 수 없습니다.'));}}>현재 검색조건 상위 20개 정량 평가</button>
          {screen&&<div role="status"><b>평가 {screen.screened}종 · 분석 가능 {screen.ready}종</b><small>미확인 전략은 점수를 임의로 채우지 않습니다. 자동매매와 분리된 참고 정보입니다.</small>
            {screen.items.map(x=><p key={x.symbol}>{x.symbol} · {x.score===null?'자료 부족':x.score+'점'} · 충족률 {x.coverage_pct??0}%</p>)}</div>}
          {(catalog?.items??[]).map(x=><button key={x.market+x.symbol} onClick={()=>void openSecurity(x)}><b>{x.symbol}</b><span>{x.name}</span><small>{x.market} · {x.kind}</small></button>)}
-         {!catalog?.items.length&&<p>검색 결과가 없습니다. 공개 목록 갱신을 시도해 보세요.</p>}</div>
+         {!catalog?.items.length&&<p>검색 결과가 없습니다. 공개 목록 갱신을 눌러 미국 Nasdaq Trader·한국 KIND 목록을 불러오세요. 외부 사이트 연결 실패 시 기존 캐시만 표시됩니다.</p>}
+         <div style={{display:'flex',gap:8,alignItems:'center'}}>
+           <button type="button" disabled={catalogOffset===0} onClick={()=>setCatalogOffset(v=>Math.max(0,v-50))}>이전 50개</button>
+           <span>{catalog?.total?catalogOffset+1:0}~{Math.min(catalogOffset+50,catalog?.total??0)} / {catalog?.total??0}개</span>
+           <button type="button" disabled={!catalog||catalogOffset+50>=catalog.total} onClick={()=>setCatalogOffset(v=>v+50)}>다음 50개</button>
+         </div>
+         <p><small>상장 목록에는 거래정지·상장폐지 반영 지연이나 ETF 누락이 있을 수 있습니다. 검색 가능과 거래 가능은 다릅니다.</small></p></div>
        <div className="wh-security"><h3>종목 상세</h3>{selected?<><h2>{selected.name}</h2><p>{selected.symbol} · {selected.market} · {selected.kind}</p>
          <p>기준 종가: {selectedQuote?.status==='ok'?fmt(selectedQuote.price,2)+' '+(selectedQuote.currency||''):'검증되지 않음'}</p><p>기준일: {selectedQuote?.as_of??'미확인'}</p><p>출처: {selectedQuote?.source??selected.source}</p>
          <div className="wh-assessment"><b>8전략 정량 연구</b>
