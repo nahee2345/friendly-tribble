@@ -477,6 +477,23 @@ def create_app(
             except ValueError:
                 raise _error(404,"INBOX_ITEM_NOT_FOUND","읽음 처리할 알림을 찾을 수 없습니다.") from None
 
+        @app.get("/api/v1/stage1/release-integrity")
+        def stage7_paper_integrity(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
+            """Read-only paper ledger consistency; never repairs or writes."""
+            from .stage7_release import audit_paper_ledger
+            return audit_paper_ledger(actor.owner_id,portfolio_store)
+
+        @app.get("/api/v1/stage1/backups/{filename}/verify")
+        def stage7_verify_paper_backup(filename: str,
+                        actor: Actor = Depends(current_actor)) -> dict[str, Any]:
+            """Verify existing paper-only SQLite backup without restoring it."""
+            from .stage7_release import verify_backup_copy
+            try:
+                return verify_backup_copy(portfolio_store,filename,actor.owner_id)
+            except (ValueError,OSError):
+                raise _error(422,"PAPER_BACKUP_PREFLIGHT_FAILED",
+                             "백업 파일명·권한·SQLite 무결성 검사에 실패했습니다.") from None
+
         @app.get("/api/v1/stage1/storage-health")
         def stage1_storage_health(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
             from .stage1_schema import version_status
