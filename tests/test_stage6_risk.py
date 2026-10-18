@@ -339,3 +339,35 @@ def test_correlated_risk_notification_cites_both_prices_and_deduplicates(tmp_pat
     note=next(x for x in inbox("alice",p)["items"] if "VOO / VTI" in x["title"])
     assert "근거1 " in note["detail"] and "근거2 " in note["detail"]
     assert "stooq.com" in note["detail"]
+
+
+def test_stage4_rechecks_risk_snapshot_hash_after_external_change(tmp_path):
+    ledger,p,cache,risk=prepare(tmp_path)
+    prefs=PreferenceStore(p.path)
+    prefs.save("alice",100,100)
+    policy=StrategyPolicy(p)
+    weights={key:(100 if key=="index" else 0) for key in DEFAULT_WEIGHTS}
+    policy.save("alice",weights)
+    mark(cache,"VOO","100")
+    called=[]
+    def changed_provider(symbol):
+        if not called:
+            called.append(True)
+            # Provider correction arrives AFTER planning. Risk provenance
+            # must be rechecked even when independently checked quote matches.
+            earlier=history("VOO")
+            earlier["prices"][10]["close"]="87.44"
+            write(cache,"HISTORY","VOO",earlier)
+        return quote(symbol,100)
+    engine=PortfolioEngine(p,prefs,cache,policy=policy,
+        quote_provider=changed_provider,
+        fx_provider=lambda:{"status":"ok","executable":False,
+            "as_of":CLOSE.isoformat(),"usd_krw":"1400"})
+    planned=engine.preview("alice",now=NOW)
+    assert any(x["symbol"]=="VOO" for x in planned["proposed_orders"])
+    from wealthy_server.stage1_controls import set_paused
+    set_paused("alice",p,False,"risk race test")
+    outcome=engine.run("alice",now=NOW)
+    assert not outcome["executed"]
+    assert outcome["skipped"][0]["reason"]=="RISK_OR_PRICE_REFERENCE_CHANGED"
+    assert not p.orders("alice","default")["orders"]
