@@ -21,6 +21,9 @@ type RiskMetric={status:string;annualized_volatility_pct:number;max_drawdown_pct
 type RiskEvidence={provider:string;url:string;as_of:string;sha256:string;verified_utc:string};
 type Replay={status:string;reason?:string;period_start?:string;period_end?:string;strategy_return_pct?:number;buy_hold_return_pct?:number;strategy_max_drawdown_pct?:number;friction_each_switch_pct?:number;switches?:number;limitations?:string[]};
 type RiskReport={engine_version:string;status:string;as_of_utc:string;holdings:{account:string;symbol:string;quantity:number;currency:string;value_krw:string|null;risk:RiskMetric|null;source:RiskEvidence|null}[];currency_proxies:{currency:string;risk?:RiskMetric;status:string}[];combined_krw_historical_risk:{reason:string;status:string};concentration:{symbol:string;share_of_invested_assets_pct:number;alert:boolean}[];possible_etf_index_overlap:{symbols:string[];reason:string}[];stress:{estimated_loss_krw:string;exposure_krw:string}|null;alerts:{symbol:string;level:string;reason:string;source:RiskEvidence|null;other_source?:RiskEvidence|null}[];valuation_missing:string[];candidate?:{symbol:string;risk:RiskMetric|null;guard:{status:string;reason:string};source:RiskEvidence|null;momentum_replay:Replay}|null};
+type Stage8Order={symbol:string;side:string;account:string;quantity:number;krw_notional:string;hypothetical_unit_price:string;unit_currency:string;strategy_score:number|null;coverage_pct:number|null};
+type Stage8Scenario={status:string;trust_label:string;scenario_for_kst:string;hypothetical_reference_as_of:string;initial_cash_krw:string;next_monthly_deposit_krw:string;strategy_example:{weights:Record<string,number>;allocation:{us_weight:number;kr_weight:number;etf_weight:number;stock_weight:number};note:string};starting_accounts:{account_id:string;cash_krw:string;cash_usd:string;positions:{symbol:string;quantity:number}[]}[];market_closed_check:{status:string;orders_executed:number};weekday_replay:{status:string;risk_budget_krw:string;estimated_spend_krw:string;orders:Stage8Order[];skipped:{symbol:string;reason?:string}[];ending_accounts:{account_id:string;cash_krw:string;cash_usd:string;positions:{symbol:string;quantity:number}[]}[];integrity:string;repeat_run_new_orders:number;funding_reconciled:boolean};price_fixture:Record<string,string|Record<string,string>>;important:string[];active_user_ledger_touched:boolean;provider_network_used:boolean;broker_used:boolean;ai_used:boolean};
+type Stage8Result={status:string;mode:string;local_market:{today_kst:string;weekend:boolean;exchange_holiday_calendar_verified:boolean;notice:string};actual_owner:{initial_4000000_recorded:boolean;cash_krw:string;cash_usd:string;cash_only_total_krw:string|null;holdings_count:number;accounts:{id:string;name:string;krw_cash:string;usd_cash:string;holdings_count:number}[];valuation_notice:string};scenario:Stage8Scenario|{status:string;error_class?:string;orders:Stage8Order[]};not_actual_orders:boolean;no_user_trades_added:boolean;market_news_not_synthesized:boolean};
 type Stage5Accounting={nav_history:History[];status:string;valuation_complete:boolean;market_valuation_krw:string|null;gross_change_after_contributions_krw:string|null;contributions_krw:string;gross_change_pct:string|null;reference_usd_krw:string|null;xirr:{status:string;pct:number|null;reason?:string};twr:{status:string;pct:number|null;reason?:string};native_gross_pnl:Record<string,{realized:string;unrealized:string}>;positions:{account:string;symbol:string;currency:string;unrealized_native:string;fx_effect_krw:string|null;market_price_effect_krw:string|null;fx_split_status:string;price_as_of:string;price_source_url:string}[];potential_dividends:{symbol:string;ex_date:string;potential_gross:string;currency:string;source_url:string}[];fee_analysis:{illustrative_trade_fees_krw:string|null;actual_fee_amount_complete:boolean};tax_illustrations:{status:string;domestic_isa?:{included_symbols:string[];taxable_gain_proxy_krw:string;general_scenario_tax_krw:string;isa_scenario_tax_krw:string;potential_isa_saving_krw:string}|null;warning?:string};missing:string[];warnings:string[]};
 
 
@@ -67,6 +70,8 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
   const [accounting,setAccounting]=useState<Stage5Accounting|null>(null);
   const [showAccounting,setShowAccounting]=useState(false);
   const [showPlan,setShowPlan]=useState(false);
+  const [stage8,setStage8]=useState<Stage8Result|null>(null);
+  const [showStage8,setShowStage8]=useState(false);
   const [riskReview,setRiskReview]=useState<RiskReport|null>(null);
   const [showRiskReview,setShowRiskReview]=useState(false);
   const [selectedSymbolRisk,setSelectedSymbolRisk]=useState<RiskReport|null>(null);
@@ -78,13 +83,15 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
       read<QuantBatch>('/api/v1/stage1/quantitative'),
       read<PaperPlan>('/api/v1/stage1/portfolio-plan'),
       read<Stage5Accounting>('/api/v1/stage1/accounting'),
-      read<RiskReport>('/api/v1/stage1/risk-review')]);
+      read<RiskReport>('/api/v1/stage1/risk-review'),
+      read<Stage8Result>('/api/v1/stage1/stage8-simulation')]);
     if(results[0].status==='fulfilled')setHub(results[0].value);else setError('시장·자산 평가를 확인하지 못했습니다. 서버와 가격 공급원을 확인하세요.');
     if(results[1].status==='fulfilled')setNews(results[1].value);
     if(results[2].status==='fulfilled')setQuant(results[2].value);else setQuant(null);
     if(results[3].status==='fulfilled')setPlan(results[3].value);else setPlan(null);
     if(results[4].status==='fulfilled')setAccounting(results[4].value);else setAccounting(null);
     if(results[5].status==='fulfilled')setRiskReview(results[5].value);else setRiskReview(null);
+    if(results[6].status==='fulfilled')setStage8(results[6].value);else setStage8(null);
     const inbox=await read<{items:{event_id:string;read_at:string|null}[]}>('/api/v1/stage1/inbox').catch(()=>null);
     if(inbox)setRiskUnread(inbox.items.filter(x=>x.event_id.startsWith('risk:')&&!x.read_at).length);
     const reference=await read<ReferenceHealth>('/api/v1/stage1/reference/health').catch(()=>null);
@@ -99,6 +106,10 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
   },[tab,query,market,kind]);
   const relevantNews=useMemo(()=>detail&&news?news.news.filter(n=>n.symbols.includes(detail.symbol)).slice(0,5):[],[detail,news]);
   const activeQuant=useMemo(()=>detail?quant?.items.find(x=>x.symbol===detail.symbol)??null:null,[detail,quant]);
+  const sandbox=stage8?.status==='ready'&&stage8.scenario.status==='completed_sandbox_only'
+    ?stage8.scenario as Stage8Scenario:null;
+  const actualOnlyCash=stage8?.actual_owner.cash_only_total_krw??null;
+  const actualAccounts=stage8?.actual_owner.accounts.map(a=>({...a,holdings:a.holdings_count}))??[];
   const rankedRecommendations=useMemo(()=>{
     const items=(hub?.recommendations??[]).slice();
     if(!quant)return items;
