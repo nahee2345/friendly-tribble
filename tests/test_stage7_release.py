@@ -297,3 +297,22 @@ def test_audit_owner_ledger_limit_is_bounded_to_50000_rows(tmp_path):
     from wealthy_server.stage7_release import MAX_ROWS,ERRORS_LIMIT
     assert MAX_ROWS==50000 and ERRORS_LIMIT<=35
     assert audit(p)["read_only"]
+
+
+def test_old_five_column_daily_nav_is_warning_and_audit_does_not_migrate(tmp_path):
+    _,p=setup(tmp_path)
+    with p._db() as db:
+        db.execute("""CREATE TABLE stage5_nav_snapshots(
+            owner TEXT NOT NULL,as_of_day TEXT NOT NULL,
+            observed_utc TEXT NOT NULL,nav_krw TEXT NOT NULL,
+            sources_sha256 TEXT NOT NULL,
+            PRIMARY KEY(owner,as_of_day))""")
+        db.execute("""INSERT INTO stage5_nav_snapshots
+            VALUES (?,?,?,?,?)""",("alice",NOW.date().isoformat(),
+            NOW.isoformat(),"4000000","a"*64))
+    result=audit(p)
+    assert result["status"]=="warning",result
+    assert "UNSIGNED_LEGACY_NAV" in {x["code"] for x in result["issues"]}
+    with p._db() as db:
+        assert len(db.execute("PRAGMA table_info(stage5_nav_snapshots)").fetchall())==5
+    assert result["repair_performed"] is False
