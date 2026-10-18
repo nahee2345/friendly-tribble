@@ -3,7 +3,8 @@ import './manual-assets.css';
 
 type Stock={account:string;symbol:string;currency:string;quantity:string};
 type Balance={label:string;currency:string;amount:string};
-type Result={items:Stock[];balances:Balance[];scope:string;included_in_paper_nav:boolean};
+type ManualTrade={account:string;symbol:string;currency:string;side:string;quantity:string;unit_price:string|null;trade_date:string|null;recorded_at:string};
+type Result={items:Stock[];balances:Balance[];history:ManualTrade[];scope:string;included_in_paper_nav:boolean};
 
 function csrf():string{
   const item=document.cookie.split(';').map(v=>v.trim()).find(v=>v.startsWith('wealthy_csrf='));
@@ -24,6 +25,8 @@ export function ManualAssetsPanel(){
   const [symbol,setSymbol]=useState('AAPL');
   const [currency,setCurrency]=useState('USD');
   const [quantity,setQuantity]=useState('1');
+  const [unitPrice,setUnitPrice]=useState('');
+  const [tradeDate,setTradeDate]=useState('');
   const [label,setLabel]=useState('별도 보유 현금');
   const [assetCurrency,setAssetCurrency]=useState('KRW');
   const [amount,setAmount]=useState('100000');
@@ -47,8 +50,10 @@ export function ManualAssetsPanel(){
       <input aria-label="보유 종목 코드" value={symbol} onChange={e=>setSymbol(e.target.value)} placeholder="AAPL / 005930"/>
       <select aria-label="보유 주식 통화" value={currency} onChange={e=>setCurrency(e.target.value)}><option>USD</option><option>KRW</option></select>
       <input aria-label="주식 수량" inputMode="decimal" value={quantity} onChange={e=>setQuantity(e.target.value)}/>
-      <button type="button" disabled={busy} onClick={()=>void change('/api/v1/stage1/manual-assets',{account,symbol,currency,quantity,side:'ADD'})}>+ 주식 추가</button>
-      <button type="button" disabled={busy} onClick={()=>void change('/api/v1/stage1/manual-assets',{account,symbol,currency,quantity,side:'REMOVE'})}>− 주식 차감</button>
+      <input aria-label="매매 단가 (선택)" inputMode="decimal" value={unitPrice} onChange={e=>setUnitPrice(e.target.value)} placeholder="주당 매수가 (선택)"/>
+      <input aria-label="매매 날짜 (선택)" type="date" value={tradeDate} onChange={e=>setTradeDate(e.target.value)}/>
+      <button type="button" disabled={busy} onClick={()=>void change('/api/v1/stage1/manual-assets',{account,symbol,currency,quantity,unit_price:unitPrice||null,trade_date:tradeDate||null,side:'ADD'})}>+ 주식 추가</button>
+      <button type="button" disabled={busy} onClick={()=>void change('/api/v1/stage1/manual-assets',{account,symbol,currency,quantity,unit_price:unitPrice||null,trade_date:tradeDate||null,side:'REMOVE'})}>− 주식 차감</button>
     </div>
     <h3>현금·예금 등 별도 자산</h3>
     <div className="manual-form-grid">
@@ -66,6 +71,12 @@ export function ManualAssetsPanel(){
     <h3>저장된 현금·기타 자산</h3>
     {(data?.balances??[]).map(x=><p key={x.label+x.currency}>{x.label} · {x.amount} {x.currency}</p>)}
     {!data?.balances.length&&<p>직접 등록된 자산이 없습니다.</p>}
+    <h3>직접 기록한 주식 증감 이력 · 최근 100건</h3>
+    {(data?.history??[]).map((x,i)=><p key={x.recorded_at+x.symbol+i}>
+      {x.trade_date??x.recorded_at.slice(0,10)} · {x.side==='ADD'?'+':'−'} {x.symbol} {x.quantity}주
+      {x.unit_price?' · 주당 '+x.unit_price+' '+x.currency:' · 취득단가 미입력'}
+    </p>)}
+    <p>이력은 사용자가 입력한 내역입니다. 이전 입력의 취득단가가 없으면 평균단가·손익을 계산하지 않습니다.</p>
       </div>
     </details>
   </section>;
