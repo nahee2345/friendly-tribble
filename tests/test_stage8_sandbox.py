@@ -45,6 +45,12 @@ def test_4m_sandbox_actual_stage4_buy_and_idempotency():
     assert Decimal(sample["estimated_spend_krw"])<=Decimal(200000)
     assert Decimal(sample["estimated_spend_krw"])>0
     assert {x["symbol"] for x in sample["orders"]}=={"VOO","069500"}
+    executed={x["symbol"]:x for x in sample["orders"]}
+    assert executed["VOO"]["account"]=="default" and executed["VOO"]["quantity"]==1
+    assert executed["069500"]["account"]=="isa-base" and executed["069500"]["quantity"]==4
+    assert Decimal(executed["VOO"]["krw_notional"])==112000
+    assert Decimal(executed["069500"]["krw_notional"])==80000
+    assert Decimal(sample["estimated_spend_krw"])==192000
     assert all(x["side"]=="BUY" for x in sample["orders"])
     assert all(x["strategy_score"]>=70 and x["coverage_pct"]==100
                for x in sample["orders"])
