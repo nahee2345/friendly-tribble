@@ -42,7 +42,7 @@ const navItems = [
   { to: "/reports", icon: "▥", label: "보고서" },
   { to: "/automation", icon: "↻", label: "자동화 관리" },
   { to: "/providers/kis", icon: "⌘", label: "KIS API 설정" },
-  { to: "/settings", icon: "⚙", label: "공통 설정" }
+  { to: "/settings", icon: "⚙", label: "설정" }
 ];
 
 function initialTheme(): Theme {
