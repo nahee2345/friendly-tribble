@@ -150,8 +150,10 @@ def _uncommitted_scenario(run_utc,close):
         integrity=audit_paper_ledger(DEMO_OWNER,paper,now=run_utc)
         if integrity["status"]=="blocked":
             raise ValueError("Stage8 simulation ledger failed Stage7 preflight")
-        spent=sum(Decimal(x["notional_krw"]) for x in result.get("executed",[])
-                  if x.get("side")=="BUY")
+        plans={x["request_id"]:x for x in plan["proposed_orders"]}
+        spent=sum((Decimal(plans[x["request_id"]]["notional_krw"])
+                   for x in result.get("executed",[]) if x.get("side")=="BUY"),
+                  Decimal(0))
         maximum=Decimal(plan["daily_spend_cap_krw"])
         if spent>maximum or spent>Decimal("200000"):
             raise ValueError("Stage8 scenario exceeded 5% risk budget")
@@ -180,7 +182,7 @@ def _uncommitted_scenario(run_utc,close):
                 "estimated_spend_krw":str(spent),
                 "orders":[{"symbol":x["symbol"],"side":x["side"],
                            "account":x["account"],"quantity":x["quantity"],
-                           "krw_notional":x["notional_krw"],
+                           "krw_notional":plans[x["request_id"]]["notional_krw"],
                            "hypothetical_unit_price":SYMBOLS[x["symbol"]]["hypothetical_close"],
                            "unit_currency":"KRW" if x["symbol"].isdigit() else "USD",
                            "strategy_score":next((i["strategy_score"]
