@@ -676,6 +676,22 @@ def create_app(
                 raise _error(422,"PAPER_PLAN_EXECUTION_REJECTED",
                              "가상주문 통합 위험·잔액 검증에서 실행이 거부되었습니다.") from None
 
+        @app.get("/api/v1/stage1/screen")
+        def stage10_screen(q: str = "", market: str = "ALL", kind: str = "ALL",
+                           limit: int = 20, offset: int = 0,
+                           actor: Actor = Depends(current_actor)) -> dict[str, Any]:
+            """Search-backed, verified-cache-only 8-factor screener. No order side effects."""
+            from .stage10_screener import screen
+            try:
+                weights=stage1_strategy_policy.get(actor.owner_id)["weights"]
+                accounts=portfolio_store.list(actor.owner_id)["accounts"]
+                holdings=[h for a in accounts for h in a["holdings"]]
+                return screen(portfolio_store,stage2_store,weights,q=q,market=market,
+                              kind=kind,limit=limit,offset=offset,holdings=holdings)
+            except ValueError:
+                raise _error(400,"STAGE10_SCREEN_INVALID",
+                             "검색 조건이나 투자전략 설정이 올바르지 않습니다.") from None
+
         @app.get("/api/v1/stage1/quantitative")
         def stage3_quantitative(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
             """All candidate quant scores are cache-based and cannot trade."""
