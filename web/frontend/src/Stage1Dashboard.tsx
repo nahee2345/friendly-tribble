@@ -63,6 +63,17 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
   const [catalogOffset,setCatalogOffset]=useState(0);
   const [catalog,setCatalog]=useState<Catalog|null>(null);
   const [screen,setScreen]=useState<{screened:number;ready:number;items:{symbol:string;status:string;score:number|null;coverage_pct:number}[]}|null>(null);
+  const [manualAssets,setManualAssets]=useState<{items:{account:string;symbol:string;currency:string;quantity:string}[]}|null>(null);
+  const [manualAccount,setManualAccount]=useState('default');
+  const [manualSymbol,setManualSymbol]=useState('AAPL');
+  const [manualQuantity,setManualQuantity]=useState('1');
+  const [manualCurrency,setManualCurrency]=useState('USD');
+  async function reloadManualAssets(){try{setManualAssets(await read<{items:{account:string;symbol:string;currency:string;quantity:string}[]}>('/api/v1/stage1/manual-assets'));}catch{setError('수동 보유종목을 확인하지 못했습니다.');}}
+  async function adjustManual(side:'ADD'|'REMOVE'){
+    try{await write('/api/v1/stage1/manual-assets',{account:manualAccount,symbol:manualSymbol.toUpperCase(),currency:manualCurrency,quantity:manualQuantity,side});
+      await reloadManualAssets();}
+    catch{setError('수동 보유종목 변경 실패: 계좌·종목·수량을 확인하세요.');}
+  }
   const [selected,setSelected]=useState<Security|null>(null);
   const [selectedQuote,setSelectedQuote]=useState<{status:string;price?:string;currency?:string;as_of?:string;source?:string}|null>(null);
   const [riskUnread,setRiskUnread]=useState(0);
@@ -286,6 +297,20 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
        <select value={market} onChange={e=>{setMarket(e.target.value);setCatalogOffset(0);}}><option value="ALL">전체 시장</option><option value="KR">한국</option><option value="US">미국</option></select>
        <select value={kind} onChange={e=>{setKind(e.target.value);setCatalogOffset(0);}}><option value="ALL">전체 상품</option><option value="STOCK">개별주</option><option value="ETF">ETF</option></select>
        <button disabled={busy} onClick={()=>void refreshCatalog()}>전체 목록 갱신</button></div>
+       <section aria-label="내가 직접 보유한 주식 등록" style={{padding:12,border:'1px solid #8885',borderRadius:8}}>
+        <b>직접 보유종목 등록 · 모의투자 원장과 별도</b>
+        <p>실제로 보유한 주식·ETF의 수량을 기록합니다. 가격·평가액·자동매매 및 현금잔고에는 반영되지 않습니다.</p>
+        <select aria-label="등록 계좌" value={manualAccount} onChange={e=>setManualAccount(e.target.value)}>
+         <option value="default">미국 일반</option><option value="kr-base">한국 일반</option><option value="isa-base">ISA</option>
+        </select>
+        <input aria-label="등록 종목코드" value={manualSymbol} onChange={e=>setManualSymbol(e.target.value)} placeholder="AAPL 또는 005930"/>
+        <select aria-label="등록 통화" value={manualCurrency} onChange={e=>setManualCurrency(e.target.value)}><option value="USD">USD</option><option value="KRW">KRW</option></select>
+        <input aria-label="증감할 주식 수량" inputMode="decimal" value={manualQuantity} onChange={e=>setManualQuantity(e.target.value)}/>
+        <button type="button" onClick={()=>void adjustManual('ADD')}>+ 추가</button>
+        <button type="button" onClick={()=>void adjustManual('REMOVE')}>− 감소</button>
+        <button type="button" onClick={()=>void reloadManualAssets()}>내 기록 조회</button>
+        {(manualAssets?.items??[]).map(x=><p key={x.account+x.symbol+x.currency}>{x.account} · {x.symbol} · {x.quantity}주 ({x.currency})</p>)}
+       </section>
        <div className="wh-catalog"><div className="wh-searchresults"><div className="wh-head"><b>검색 결과 {fmt(catalog?.total)}개</b><small>미국 {catalog?.catalog_status?.US?.download_rows??'미확인'}개 · 한국 {catalog?.catalog_status?.KR?.download_rows??'미확인'}개 수집 기록 · 최대 50개/페이지</small></div>
          <button disabled={busy} onClick={()=>{setScreen(null);void read<{screened:number;ready:number;items:{symbol:string;status:string;score:number|null;coverage_pct:number}[]}>('/api/v1/stage1/screen?'+new URLSearchParams({q:query,market,kind,limit:'20'})).then(setScreen).catch(()=>setError('정량 검색 결과를 확인할 수 없습니다.'));}}>현재 검색조건 상위 20개 정량 평가</button>
          {screen&&<div role="status"><b>평가 {screen.screened}종 · 분석 가능 {screen.ready}종</b><small>미확인 전략은 점수를 임의로 채우지 않습니다. 자동매매와 분리된 참고 정보입니다.</small>
