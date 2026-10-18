@@ -299,6 +299,39 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
          <p>종목 검색은 자동매수 승인과 다릅니다. 검증되지 않은 데이터는 체결에 사용하지 않습니다.</p></>:<p>왼쪽에서 종목을 선택해 주세요.</p>}
          <small>{catalog?.notice??'종목목록 범위 확인 중'}</small></div></div>
       </main>}
+    {showStage8&&<div className="wh-overlay" onClick={()=>setShowStage8(false)}>
+      <div className="wh-modal" role="dialog" aria-modal="true" aria-label="8단계 가상투자 검증" onClick={e=>e.stopPropagation()}>
+        <div className="wh-head"><b>8단계 · 400만원 모의투자 1회 검증</b><button onClick={()=>setShowStage8(false)} aria-label="닫기">✕</button></div>
+        <div className="wh-slide">
+          <h4>실제 사용자 가상계좌</h4>
+          <p>초기 400만원: {stage8?.actual_owner.initial_4000000_recorded?"입금 확인":"확인 대기"}</p>
+          <p>원화 현금 ₩{fmt(stage8?.actual_owner.cash_krw)} · 달러 현금 {fmt(stage8?.actual_owner.cash_usd,2)} USD · 실제 보유 {stage8?.actual_owner.holdings_count??0}종</p>
+          <p>아래 내역은 별도 임시 SQLite 테스트이며 내 가상계좌의 매매나 추천이 아닙니다.</p>
+          {sandbox?<>
+            <h4>가정한 매수 근거와 조건</h4>
+            <p>{sandbox.trust_label}</p>
+            <p>자료일 {sandbox.hypothetical_reference_as_of} · 가정 평일 {sandbox.scenario_for_kst}</p>
+            <p>{sandbox.strategy_example.note}</p>
+            <p>주말 주문 {sandbox.market_closed_check.orders_executed}건 · 가정 평일 예산 ₩{fmt(sandbox.weekday_replay.risk_budget_krw)} · 실제 시험 매수 ₩{fmt(sandbox.weekday_replay.estimated_spend_krw)}</p>
+            {sandbox.weekday_replay.orders.map((order,i)=><p key={i}>
+              <b>{order.symbol}</b> · {order.account} · {order.quantity}주
+              · 단가 {fmt(order.hypothetical_unit_price,2)} {order.unit_currency}
+              · 원화 환산 ₩{fmt(order.krw_notional)}
+              · 전략 점수 {order.strategy_score??"미산정"} · 충족률 {order.coverage_pct??0}%
+            </p>)}
+            <h4>가상체결 후 계좌</h4>
+            {sandbox.weekday_replay.ending_accounts.map(a=><p key={a.account_id}>
+              {a.account_id} · 현금 ₩{fmt(a.cash_krw)} / {fmt(a.cash_usd,2)} USD
+              · 보유 {a.positions.map(x=>x.symbol+" "+x.quantity+"주").join(", ")||"없음"}
+            </p>)}
+            <p>중복 재체결 {sandbox.weekday_replay.repeat_run_new_orders}건 · 무결성 {sandbox.weekday_replay.integrity}</p>
+            <h4>언제 매도하는가?</h4>
+            <p>확정 매도일을 예측할 수 없습니다. 기존 기준은 -7% 손실, +15% 이익, 집중도와 목표비중 초과를 다시 검토하며 매도 전 새 시세를 요구합니다.</p>
+            {sandbox.important.map((item,i)=><p key={i}><small>{item}</small></p>)}
+          </>:<p>검증용 실행이 완료되지 않았습니다. 실제 시세나 임의 주문으로 결과를 대체하지 않습니다.</p>}
+        </div>
+      </div>
+    </div>}
     {showRiskReview&&<div className="wh-overlay" onClick={()=>setShowRiskReview(false)}>
       <div className="wh-modal" role="dialog" aria-modal="true" aria-label="6단계 보유종목 위험 검토" onClick={e=>e.stopPropagation()}>
         <div className="wh-head"><b>6단계 변동성·집중도·스트레스 분석</b><button onClick={()=>setShowRiskReview(false)} aria-label="닫기">✕</button></div>
