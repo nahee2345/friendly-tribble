@@ -13,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 CANDIDATES = (
     ('VOO','Vanguard S&P 500 ETF','ETF','미국 대형주 500개 기업에 분산', 'https://investor.vanguard.com/investment-products/etfs/profile/voo'),
+    ('SPYM','State Street SPDR Portfolio S&P 500 ETF','ETF','미국 대형주 지수 추종, 단일 주당 가격이 상대적으로 낮아 소액 포트폴리오에 적합할 수 있으나 가격·환율 검증 필수','https://www.ssga.com/us/en/intermediary/etfs/state-street-spdr-portfolio-sp-500-etf-spym'),
     ('VTI','Vanguard Total Stock Market ETF','ETF','미국 주식시장 전반에 분산', 'https://investor.vanguard.com/investment-products/etfs/profile/vti'),
     ('QQQM','Invesco NASDAQ 100 ETF','ETF','나스닥 100 대형 비금융주, 기술주 집중 위험', 'https://www.invesco.com/us/financial-products/etfs/product-detail?productId=QQQM'),
     ('SCHD','Schwab U.S. Dividend Equity ETF','ETF','미국 배당주 중심, 배당 변동 위험', 'https://www.schwabassetmanagement.com/products/schd'),
