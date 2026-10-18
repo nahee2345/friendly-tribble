@@ -322,3 +322,20 @@ def test_stage4_candidate_risk_veto_is_enforced_when_quant_signal_exists(tmp_pat
     assert not any(x["side"]=="BUY" and x["symbol"]=="VOO"
                    for x in plan["proposed_orders"])
     assert risk.report("alice",now=NOW,candidate="VOO")["candidate"]["guard"]["status"]=="hold"
+
+
+def test_correlated_risk_notification_cites_both_prices_and_deduplicates(tmp_path):
+    _,p,cache,risk=prepare(tmp_path)
+    mark(cache,"VOO","100")
+    mark(cache,"VTI","100")
+    p.auto_buy_usd_with_fx("alice","VOO",quote("VOO",100),"1400","corr-alert-001")
+    p.auto_buy_usd_with_fx("alice","VTI",quote("VTI",100),"1400","corr-alert-002")
+    observed=risk.report("alice",now=NOW)
+    correlation=next(x for x in observed["alerts"] if x["level"]=="correlation")
+    assert correlation["other_source"]["url"].endswith("s=vti.us&i=d&d1=20260101&d2=20261019")
+    assert correlation["source"]["sha256"]!=correlation["other_source"]["sha256"]
+    assert risk.publish_alerts("alice",now=NOW)["new_alerts"]>=1
+    assert risk.publish_alerts("alice",now=NOW)["new_alerts"]==0
+    note=next(x for x in inbox("alice",p)["items"] if "VOO / VTI" in x["title"])
+    assert "근거1 " in note["detail"] and "근거2 " in note["detail"]
+    assert "stooq.com" in note["detail"]
