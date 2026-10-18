@@ -8,7 +8,7 @@ type Recommendation={symbol:string;name:string;region:string;kind:string;account
 type History={date:string;value_krw:string|null;contributed_krw:number;complete:boolean};
 type Hub={markets:Market[];performance:Performance;history:History[];accounts:{id:string;name:string;krw_cash:string;usd_cash:string;holdings:number}[];recommendations:Recommendation[];notice:string};
 type PriceTrend={status:string;symbol:string;market:string;change_pct?:number;first_date?:string;as_of?:string;points?:{date:string;close:string}[];source?:string;reason?:string};
-type News={title:string;url:string;market:string;symbols:string[];impact:string;reason:string;confidence:string;published_utc:string;source:string};
+type News={title:string;title_ko?:string|null;translation_status?:string;publisher?:string;editorial_lean?:string;editorial_source?:string|null;url:string;market:string;symbols:string[];impact:string;reason:string;confidence:string;published_utc:string;source:string};
 type NewsReport={status:string;summary:{checked:number;related:number;risk_suspected:number};news:News[];risk_suspected:News[];coverage:string};
 type Security={market:string;symbol:string;name:string;kind:string;source:string;updated_at:string};
 type Catalog={items:Security[];total:number;is_complete:boolean;catalog_status:Record<string,{status:string;download_rows:number}>;notice:string};
@@ -252,9 +252,9 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
         {(hub?.accounts??actualAccounts).map(a=><div className="wh-account" key={a.id}><b>{a.id==='default'?'미국 일반':a.id==='kr-base'?'한국 일반':a.id==='isa-base'?'ISA':a.name}</b><span>₩{fmt(a.krw_cash)} · ${fmt(a.usd_cash,2)}</span><small>보유 {a.holdings}종</small></div>)}
         {!hub&&actualAccounts.length===0&&<p>실제 가상계좌 데이터 확인 중</p>}</section>
       <section className="wh-card wh-news"><div className="wh-head"><b>최근 30일 뉴스·보유종목 영향</b><small>{news?.summary.checked??0}건 검토 · 관련 {news?.summary.related??0}건</small></div>
-        <div className="wh-feed">{(news?.news??[]).slice(0,5).map((n,i)=><div className="wh-newsrow" key={i}><span className={n.impact==='하방 위험 의심'?'wh-danger':''}>{n.impact}</span><a href={n.url} target="_blank" rel="noreferrer">{n.title}</a><small>{n.symbols.join(', ')||n.market}</small></div>)}
+        <div className="wh-feed">{(news?.news??[]).slice(0,12).map((n,i)=><div className="wh-newsrow" key={i}><span className={n.impact==='하방 위험 의심'?'wh-danger':''}>{n.impact}</span><a href={n.url} target="_blank" rel="noreferrer">{n.market==='US'?(n.title_ko??n.title):n.title}</a><small>{n.market==='KR'?(n.publisher??'언론사 미확인')+' · '+(n.editorial_lean??'분류 미확인'):(n.title_ko?'자동 번역 · 한국어':'번역 불가 · 영어 원문')} · {n.symbols.join(', ')||n.market}</small>{n.market==='KR'&&n.editorial_source&&<a href={n.editorial_source} target="_blank" rel="noreferrer">성향 분류 근거(과거 연구) ↗</a>}</div>)}
           {!news?.news.length&&<p>{news?.status==='partial'?'일부 뉴스 공급원 연결이 실패했습니다. 검토 가능한 뉴스가 부족합니다.':news?.status==='ok'?'검색 범위에서 확인된 기사가 없습니다. 뉴스가 없다는 뜻은 아닙니다.':'뉴스 수집을 완료하지 못했습니다. 네트워크와 공개 RSS 제공 상태를 확인하세요.'}</p>}</div>
-        <small className="wh-caveat">제목 기반 관련성 분석이며 실제 가격 영향은 미확인입니다.</small></section>
+        <small className="wh-caveat">한국 언론사의 정치 성향은 과거 연구의 분류를 참고한 것이며 해당 기사 자체의 성향이나 사실 여부를 뜻하지 않습니다. 해외 기사는 번역 실패 시 원문을 표시합니다.</small></section>
       <section className="wh-card wh-risks"><div className="wh-head"><b>보유종목 위험 알림</b>
         <button className="wh-plan-trigger" onClick={()=>setShowRiskReview(true)}
           title="과거 변동성·상관관계·가정 충격·위험 근거 확인">
