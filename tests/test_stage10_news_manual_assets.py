@@ -79,3 +79,19 @@ def test_korean_publisher_rss_fallback_when_google_fails(monkeypatch):
     items=hub._fetch_rss('stocks','KR','ko')
     assert len(items)==1 and items[0]['publisher']=='매일경제'
     assert items[0]['editorial_lean']=='평가 근거 미확인'
+
+def test_optional_price_date_and_isolated_history(tmp_path):
+    store=FakeStore(tmp_path/"new.sqlite3")
+    result=adjust(store,"alice","default","AAPL","USD","2","ADD",
+                  unit_price="145.50",trade_date="2026-09-20")
+    assert result["unit_price_recorded"] is True
+    own=list_assets(store,"alice")
+    assert len(own["history"])==1
+    assert own["history"][0]["unit_price"]=="145.50"
+    assert own["history"][0]["trade_date"]=="2026-09-20"
+    assert list_assets(store,"bob")["history"]==[]
+    with pytest.raises(ValueError):
+        adjust(store,"alice","default","AAPL","USD","1","ADD",unit_price="NaN")
+    with pytest.raises(ValueError):
+        adjust(store,"alice","default","AAPL","USD","1","ADD",trade_date="2999-01-01")
+    assert len(list_assets(store,"alice")["history"])==1
