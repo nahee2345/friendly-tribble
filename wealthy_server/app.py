@@ -382,13 +382,16 @@ def create_app(
         stage4_engine = PortfolioEngine(portfolio_store, preference_store, stage2_store)
         from .stage5_accounting import AccountingEngine
         stage5_engine = AccountingEngine(portfolio_store, stage2_store)
+        from .stage6_risk import RiskEngine
+        stage6_engine = RiskEngine(portfolio_store,stage2_store)
         from .stage1_bootstrap import initialize_paper_accounts
         if market_information_auto_start:
             from .stage1_worker import PaperWorker
             paper_worker = PaperWorker(db, stage1, portfolio_store, preference_store,
                                        market_collector=stage2_collector,
                                        portfolio_engine=stage4_engine,
-                                       accounting_engine=stage5_engine)
+                                       accounting_engine=stage5_engine,
+                                       risk_engine=stage6_engine)
             app.state.paper_worker = paper_worker
             app.router.add_event_handler("startup", paper_worker.start)
             app.router.add_event_handler("shutdown", paper_worker.stop)
@@ -532,6 +535,34 @@ def create_app(
         class Stage2ReferenceRefresh(BaseModel):
             kind: str
             symbol: str
+
+        @app.get("/api/v1/stage1/risk-review")
+        def stage6_risk_overview(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
+            """Owner-scoped evidence-only volatility and portfolio risk."""
+            initialize_paper_accounts(actor.owner_id,stage1,portfolio_store)
+            try:
+                return stage6_engine.report(actor.owner_id)
+            except (ValueError,KeyError,ArithmeticError):
+                raise _error(422,"RISK_REVIEW_UNAVAILABLE",
+                             "원장·시장자료 위험 검증에 실패하여 평가를 보류했습니다.") from None
+
+        @app.get("/api/v1/stage1/risk-review/{symbol}")
+        def stage6_risk_symbol(symbol: str,
+                               actor: Actor = Depends(current_actor)) -> dict[str, Any]:
+            from .stage1_catalog import ensure_seed,search
+            from .stage1_market_store import ALLOWED_SYMBOL
+            code=symbol.upper()
+            if not ALLOWED_SYMBOL.fullmatch(code) or code in ("US","KR","USD/KRW"):
+                raise _error(400,"INVALID_RISK_SYMBOL","유효한 종목을 선택해 주세요.")
+            ensure_seed(portfolio_store)
+            items=search(portfolio_store,code,limit=15)["items"]
+            if not any(x["symbol"]==code for x in items):
+                raise _error(404,"RISK_SYMBOL_NOT_LISTED","현재 종목 목록에 없습니다.")
+            initialize_paper_accounts(actor.owner_id,stage1,portfolio_store)
+            try:
+                return stage6_engine.report(actor.owner_id,candidate=code)
+            except (ValueError,KeyError,ArithmeticError):
+                raise _error(422,"RISK_SYMBOL_UNAVAILABLE","검증 가능한 위험자료가 없습니다.") from None
 
         @app.get("/api/v1/stage1/accounting")
         def stage5_accounting(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
