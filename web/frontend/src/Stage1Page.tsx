@@ -163,7 +163,9 @@ export function Stage1Page(){
   const displayValue=(accounts.reduce((v,a)=>v+Number(a.krw_cash),0));
   if(!advanced)return <Stage1Dashboard onAdvanced={()=>setAdvanced(true)}/>;
   return <div className="s1-shell"><button type="button" className="s1-outline" onClick={()=>setAdvanced(false)}>← 통합 대시보드로 돌아가기</button>
-    <div className="s1-heading"><div><div className="s1-eyebrow">WEALTHY / PAPER INVESTING</div><p className="s1-desc">기본 계좌: 미국 주식 · 한국 주식 · ISA 각 1개. 시작금 400만 원(미국 80% / 국내 10% / ISA 10%), 매월 25일 35만 원을 동일 비율로 자동 가상 입금합니다.</p><h1>가상 투자 워크스페이스</h1><p>실제 금융계좌와 분리된 모의투자 · 서버 실행 중 1시간마다 검토 · 지연 종가 기준</p></div><span className="s1-pill">{fund?.auto_trading_enabled?'● 자동 모의투자 실행 중':'● 모의거래 전용 / 자동 운용 대기'}</span></div>
+    <div className="s1-heading"><div><div className="s1-eyebrow">WEALTHY / PAPER INVESTING</div><p className="s1-desc">기본 계좌: 미국 주식 · 한국 주식 · ISA 각 1개. 시작금 400만 원(미국 80% / 국내 10% / ISA 10%), 매월 25일 35만 원을 동일 비율로 자동 가상 입금합니다.</p><h1>가상 투자 워크스페이스</h1><p>실제 금융계좌와 분리된 모의투자 · 서버 실행 중 1시간마다 검토 · 지연 종가 기준</p></div><span className="s1-pill">{paperControl===null?'가상거래 상태 확인 중':
+        paperControl.paused?'가상 자동주문 긴급 중지':
+        auto?.enabled?'가상운용 허용 · 조건부 검토 중':'가상운용 허용 · 서버 자동검토 대기'}</span></div>
     {error&&<div className="s1-error" role="alert">{error}</div>}{notice&&<div className="s1-notice" role="status">{notice}</div>}
     <section className="s1-panel">
       <div className="s1-panelhead"><h2>4단계 · 통합 모의투자 주문계획</h2><button className="s1-outline" disabled={busy} onClick={()=>void refreshStage4()}>계획 새로고침</button></div>
@@ -191,7 +193,7 @@ export function Stage1Page(){
       {stage4Plan?.review.slice(0,10).map((r,i)=><p className="s1-desc" key={i}>
         {r.symbol} · {r.account} · {r.reason}{r.approval_required?' · 자동체결 금지 / 별도 승인 필요':''}
       </p>)}
-      <button className="s1-primary" disabled={busy||paperControl?.paused||!stage4Plan?.trade_enabled||stage4Plan?.status!=='ready'||!stage4Plan?.proposed_orders.length}
+      <button className="s1-primary" disabled={busy||paperControl?.paused||releaseAudit?.status==='blocked'||!releaseAudit||!stage4Plan?.trade_enabled||stage4Plan?.status!=='ready'||!stage4Plan?.proposed_orders.length}
         onClick={()=>void runStage4()}>{busy?'검증 중…':'통합 계획으로 가상 모의투자 1회 실행'}</button>
       <p className="s1-desc">긴급 중지 해제 시에만 실행됩니다. 주문 실행 전 매수가격 편차·원화환산 투자한도·현금유보·중복 요청을 재검증합니다. 30만원 이상 자동체결은 허용하지 않습니다.</p>
       <details><summary>최근 통합 주문 원장 {stage4History.length}건 · 결과 대조</summary>
@@ -241,7 +243,8 @@ export function Stage1Page(){
         </article>)}
             {!approvals.some(a=>(a.status==='PENDING'||a.status==='APPROVED')&&!a.executed)&&<p className="s1-empty">승인 대기 중인 주문이 없습니다.</p>}
     </section>
-    <section className="s1-panel"><div className="s1-panelhead"><h2>자동 가상투자 운용</h2><span>{auto?.enabled?'서버 실행 중':'검토 대기'}</span></div>
+    <section className="s1-panel"><div className="s1-panelhead"><h2>자동 가상투자 운용</h2><span>{paperControl?.paused?'거래 중지':
+  auto?.enabled?'서버 실행 · 위험기준 검토 중':'서버 검토 대기'}</span></div>
       <p className="s1-desc">서버 가동 중 약 1시간마다 지연 시세를 확인합니다. 검증되지 않은 주문은 건너뜁니다.</p>
       <p className="s1-desc">최근 검사: {auto?.last_checked_at??'대기 중'} · 결과: {auto?.last_result.status??'대기'} {auto?.last_result.reason??''}</p>
       {auto?.last_result.us_stocks&&<p className="s1-desc">미국 개별주: {auto.last_result.us_stocks.status} · {auto.last_result.us_stocks.symbol??''} {auto.last_result.us_stocks.reason??''}</p>}
