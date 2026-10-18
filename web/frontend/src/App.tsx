@@ -4,7 +4,6 @@ import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "reac
 import { LoginPage, useAuth } from "./auth";
 import {
   AccountsPage,
-  AnalysisPage,
   AssetsPage,
   AutomationPage,
   DividendPage,
