@@ -114,6 +114,9 @@ def _fetch_rss(query,market,language):
     # Query syntax may return no items; retry a simpler topic before giving up.
     simpler=dict(params);simpler["q"]="주식 코스피" if language=="ko" else "stocks markets"
     candidates.append(base+urllib.parse.urlencode(simpler))
+    # Independent public publisher feed if Google News is unavailable for US.
+    if market=="US":
+        candidates.append("https://feeds.bbci.co.uk/news/business/rss.xml")
     root=None
     for url in candidates:
         try:
@@ -134,8 +137,9 @@ def _fetch_rss(query,market,language):
         title=(row.findtext("title") or "").strip()[:250]
         link=(row.findtext("link") or "").strip()
         pub=(row.findtext("pubDate") or "").strip()
-        if title and link.startswith("https://news.google.com/") and pub:
-            publisher=(row.findtext("source") or "").strip()[:100] or "언론사 미확인"
+        allowed_prefixes=("https://news.google.com/","https://www.bbc.com/","https://www.bbc.co.uk/")
+        if title and any(link.startswith(prefix) for prefix in allowed_prefixes) and pub:
+            publisher=(row.findtext("source") or "").strip()[:100] or ("BBC News" if "bbc." in link else "언론사 미확인")
             editorial,source_url=_editorial_context(publisher) if market=="KR" else ("해당 없음",None)
             items.append({"title":title,"url":link,"published":pub,"source":"Google News RSS",
                           "publisher":publisher,"editorial_lean":editorial,
