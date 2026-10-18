@@ -221,7 +221,7 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
     </div>}
     {tab==='home'?<main className="wh-grid">
       <section className="wh-card wh-markets"><div className="wh-head"><b>시장 현황</b><small>지연 일간 종가 · 기준일 표시</small></div><div className="wh-indexgrid">
-        {(hub?.markets??[{name:'KOSPI'},{name:'KOSDAQ'},{name:'S&P 500'},{name:'NASDAQ'}]).map(m=><div className="wh-index" key={m.name}><small>{m.name}</small><strong>{'value'in m&&m.value!==null&&m.value!==undefined?fmt(m.value,2):'미확인'}</strong><span>{'change_pct'in m&&m.change_pct!==null&&m.change_pct!==undefined?(m.change_pct>0?'+':'')+m.change_pct+'%':'등락 미확인'}</span><small>{'as_of'in m&&m.as_of?m.as_of:'원본 시세 대기'}</small></div>)}
+        {(hub?.markets??[{name:'KOSPI'},{name:'KOSDAQ'},{name:'S&P 500'},{name:'NASDAQ'}]).map(m=><div className="wh-index" key={m.name}><small>{m.name}</small><strong>{'value'in m&&m.value!==null&&m.value!==undefined?fmt(m.value,2):'미확인'}</strong><span>{'change_pct'in m&&m.change_pct!==null&&m.change_pct!==undefined?(m.change_pct>0?'+':'')+m.change_pct+'%':'등락 미확인'}</span><small title={'source'in m && m.source ? m.source : '공개 시장자료 수집 대기'}>{'as_of'in m&&m.as_of?'기준일 '+m.as_of:'시세 공급원 미응답 · 인터넷 연결과 데이터 제공 상태 확인'}</small></div>)}
         </div></section>
       <section className="wh-card wh-assets"><div className="wh-head"><b>내 총자산 흐름</b>
         <button className="wh-plan-trigger" onClick={()=>setShowAccounting(true)}>
