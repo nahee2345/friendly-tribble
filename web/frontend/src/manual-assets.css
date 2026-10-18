@@ -1,0 +1,15 @@
+.manual-assets{margin-block:1rem}
+.manual-assets>details>summary{display:flex;align-items:center;justify-content:space-between;gap:1rem;cursor:pointer;list-style:none;padding:.35rem 0}
+.manual-assets>details>summary::-webkit-details-marker{display:none}
+.manual-assets>details>summary span:first-child{display:grid;gap:.25rem}
+.manual-assets>details>summary strong{font-size:1.05rem}
+.manual-assets>details>summary small{color:var(--muted,#8293a4);font-size:.8rem}
+.manual-assets .manual-chevron{font-size:1.5rem;transition:transform .15s}
+.manual-assets details[open] .manual-chevron{transform:rotate(180deg)}
+.manual-assets-content{padding-top:1rem;border-top:1px solid rgba(140,150,160,.18);margin-top:1rem}
+.manual-assets-content>h3{margin-top:1.5rem;margin-bottom:.75rem;font-size:.95rem}
+.manual-form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.65rem;align-items:stretch}
+.manual-form-grid input,.manual-form-grid select,.manual-form-grid button{min-width:0;width:100%;box-sizing:border-box;min-height:42px}
+.manual-form-grid button{border-radius:.6rem}
+.manual-assets-content>p{line-height:1.55;overflow-wrap:anywhere}
+@media(max-width:600px){.manual-form-grid{grid-template-columns:1fr 1fr}.manual-form-grid input[aria-label="보유 종목 코드"],.manual-form-grid input[aria-label="직접 자산 이름"]{grid-column:1/-1}}
