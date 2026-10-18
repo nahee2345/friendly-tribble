@@ -858,6 +858,8 @@ def create_app(
             currency: str
             quantity: str
             side: str
+            unit_price: str | None = None
+            trade_date: str | None = None
 
         class ManualBalanceBody(BaseModel):
             label: str
@@ -886,7 +888,8 @@ def create_app(
             from .stage10_manual_assets import adjust
             try:
                 return adjust(portfolio_store,actor.owner_id,body.account,
-                              body.symbol,body.currency,body.quantity,body.side)
+                              body.symbol,body.currency,body.quantity,body.side,
+                              unit_price=body.unit_price,trade_date=body.trade_date)
             except ValueError:
                 raise _error(400,"INVALID_MANUAL_ASSET","계좌·종목·보유수량을 확인해 주세요.") from None
 
