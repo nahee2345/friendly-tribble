@@ -31,8 +31,8 @@ KST=ZoneInfo("Asia/Seoul")
 DEMO_OWNER="sandbox-stage8-only"
 SYMBOLS={"VOO":{"hypothetical_close":"80","market":"US","kind":"ETF",
                  "name":"Vanguard S&P 500 ETF"},
-         "360750":{"hypothetical_close":"20000","market":"KR","kind":"ETF",
-                  "name":"TIGER 미국S&P500"}}
+         "069500":{"hypothetical_close":"20000","market":"KR","kind":"ETF",
+                  "name":"KODEX 200"}}
 DEMO_FX="1400"
 DEMO_WEIGHT={"index":100,**{name:0 for name in DEFAULT_WEIGHTS if name!="index"}}
 DEMO_PREFERENCE={"us_weight":75,"kr_weight":25,"etf_weight":100,"stock_weight":0}
@@ -202,7 +202,7 @@ def _uncommitted_scenario(run_utc,close):
             "active_user_ledger_touched":False,
             "simulated_orders_exported":False,
             "price_fixture":{"VOO":{"USD":"80"},
-                             "360750":{"KRW":"20000"},"USD/KRW":"1400"},
+                             "069500":{"KRW":"20000"},"USD/KRW":"1400"},
             "important":["이 결과는 인공 과거가격과 임의 환율을 넣어 거래 엔진 안전성을 시험한 것입니다.",
                          "실제 지연 시세가 확보되기 전에는 동일 종목에 대한 주문을 보장하거나 권유할 수 없습니다.",
                          "주말에는 0건이며, 다음 거래일에도 현금·시세·리스크·사용자 설정에 따라 0건일 수 있습니다.",
