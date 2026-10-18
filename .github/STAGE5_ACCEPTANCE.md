@@ -1,3 +1,3 @@
-# Stage 5 test-only acceptance
+# Stage 5 current main regression audit
 
-Validate current main tax scenarios, average cost, historical foreign exchange attribution, dividends unposted, XIRR, TWR, full balance and React UI. This marker is CI only. Do not merge.
+All Python and React workflows must pass after invalid future-dated ledger event guards and real-NAV-only graph correction. No merge.
