@@ -73,6 +73,7 @@ def market_indices():
 
 def news_30d(*,now=None,fetcher=None,limit=30):
     now=now or datetime.now(timezone.utc)
+    live_fetcher=fetcher is None
     fetcher=fetcher or _fetch_rss
     summaries=[]
     missing=[]
@@ -95,7 +96,7 @@ def news_30d(*,now=None,fetcher=None,limit=30):
     items=sorted(dedup.values(),key=lambda x:x["published_utc"],reverse=True)[:limit]
     if items:
         from .stage1_research import translate_headline_redundant
-        english=[i for i in items[:12] if i["market"]=="US"]
+        english=[i for i in items if i["market"]=="US"] if live_fetcher else []
         if english:
             with ThreadPoolExecutor(max_workers=4) as pool:
                 translations=list(pool.map(translate_headline_redundant,[i["title"] for i in english]))
@@ -108,12 +109,26 @@ def news_30d(*,now=None,fetcher=None,limit=30):
 def _fetch_rss(query,market,language):
     params={"q":query,"hl":"ko","gl":"KR","ceid":"KR:ko"} if language=="ko" else {
         "q":query,"hl":"en-US","gl":"US","ceid":"US:en"}
-    url="https://news.google.com/rss/search?"+urllib.parse.urlencode(params)
-    req=urllib.request.Request(url,headers={"User-Agent":"Mozilla/5.0 WealthyPersonalResearch"})
-    with urllib.request.urlopen(req,timeout=6) as response:
-        raw=response.read(230_001)
-    if len(raw)>230_000:raise ValueError("oversized")
-    root=ET.fromstring(raw)
+    base="https://news.google.com/rss/search?"
+    candidates=[base+urllib.parse.urlencode(params)]
+    # Query syntax may return no items; retry a simpler topic before giving up.
+    simpler=dict(params);simpler["q"]="주식 코스피" if language=="ko" else "stocks markets"
+    candidates.append(base+urllib.parse.urlencode(simpler))
+    root=None
+    for url in candidates:
+        try:
+            req=urllib.request.Request(url,headers={"User-Agent":"Mozilla/5.0 WealthyPersonalResearch"})
+            with urllib.request.urlopen(req,timeout=6) as response:
+                raw=response.read(230_001)
+            if len(raw)>230_000:raise ValueError("oversized")
+            parsed=ET.fromstring(raw)
+            if parsed.findall("./channel/item"):
+                root=parsed
+                break
+        except (OSError,ValueError,ET.ParseError):
+            continue
+    if root is None:
+        raise OSError("Google News RSS unavailable or zero items in both queries")
     items=[]
     for row in root.findall("./channel/item")[:90]:
         title=(row.findtext("title") or "").strip()[:250]
