@@ -1,4 +1,5 @@
 import {useEffect,useState} from 'react';
+import './manual-assets.css';
 
 type Stock={account:string;symbol:string;currency:string;quantity:string};
 type Balance={label:string;currency:string;amount:string};
@@ -34,10 +35,14 @@ export function ManualAssetsPanel(){
     catch(e){setMessage('수정 실패: '+(e instanceof Error?e.message:'입력값을 확인하세요.'));}
     finally{setBusy(false);}
   }
-  return <section className="card" aria-label="사용자 직접 자산 입력">
-    <h2>내가 직접 보유한 자산 추가·차감</h2>
+  return <section className="card manual-assets" aria-label="사용자 직접 자산 입력">
+    <details>
+      <summary><span><strong>직접 자산 및 보유주식 관리</strong><small>자주 사용하지 않는 입력 기능 · 필요할 때만 펼치기</small></span><span className="manual-chevron" aria-hidden="true">⌄</span></summary>
+      <div className="manual-assets-content">
+    <h2>수동 기록 추가·차감</h2>
     <p>직접 입력한 주식과 자산만 기록합니다. 실제 주문이나 자동 모의투자 계좌의 현금·손익에는 반영되지 않습니다.</p>
-    <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+    <h3>주식·ETF 수량</h3>
+    <div className="manual-form-grid">
       <select aria-label="보유 주식 계좌" value={account} onChange={e=>setAccount(e.target.value)}><option value="default">미국 계좌</option><option value="kr-base">한국 계좌</option><option value="isa-base">ISA</option></select>
       <input aria-label="보유 종목 코드" value={symbol} onChange={e=>setSymbol(e.target.value)} placeholder="AAPL / 005930"/>
       <select aria-label="보유 주식 통화" value={currency} onChange={e=>setCurrency(e.target.value)}><option>USD</option><option>KRW</option></select>
@@ -45,7 +50,8 @@ export function ManualAssetsPanel(){
       <button type="button" disabled={busy} onClick={()=>void change('/api/v1/stage1/manual-assets',{account,symbol,currency,quantity,side:'ADD'})}>+ 주식 추가</button>
       <button type="button" disabled={busy} onClick={()=>void change('/api/v1/stage1/manual-assets',{account,symbol,currency,quantity,side:'REMOVE'})}>− 주식 차감</button>
     </div>
-    <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:12}}>
+    <h3>현금·예금 등 별도 자산</h3>
+    <div className="manual-form-grid">
       <input aria-label="직접 자산 이름" value={label} onChange={e=>setLabel(e.target.value)} placeholder="예금 / 현금 등"/>
       <input aria-label="증감할 자산 금액" inputMode="decimal" value={amount} onChange={e=>setAmount(e.target.value)}/>
       <select aria-label="자산 통화" value={assetCurrency} onChange={e=>setAssetCurrency(e.target.value)}><option>KRW</option><option>USD</option></select>
@@ -54,11 +60,13 @@ export function ManualAssetsPanel(){
       <button type="button" onClick={()=>void refresh()}>목록 갱신</button>
     </div>
     {message&&<p role="status">{message}</p>}
-    <h3>직접 등록한 주식</h3>
+    <h3>저장된 주식 기록</h3>
     {(data?.items??[]).map(x=><p key={x.account+x.symbol+x.currency}>{x.account} · {x.symbol} · {x.quantity}주 ({x.currency})</p>)}
     {!data?.items.length&&<p>직접 등록된 주식이 없습니다.</p>}
-    <h3>별도 자산</h3>
+    <h3>저장된 현금·기타 자산</h3>
     {(data?.balances??[]).map(x=><p key={x.label+x.currency}>{x.label} · {x.amount} {x.currency}</p>)}
     {!data?.balances.length&&<p>직접 등록된 자산이 없습니다.</p>}
+      </div>
+    </details>
   </section>;
 }
