@@ -387,6 +387,16 @@ class AccountingEngine:
             ledger_hash=_ledger_digest(owner,raw_orders,raw_meta,cash_events,
                                       transfers,accounting,corporate)
             db.execute("COMMIT")
+        # A later-dated cash event or invalid exchange can never be counted
+        # in an earlier NAV/XIRR. Fail closed instead of time-travelling cash.
+        for key,kind,krw,usd,rate,created in cash_events:
+            if stamp(created)>now+timedelta(minutes=1):
+                raise ValueError("future-dated funding or exchange event")
+            D(krw);D(usd)
+            if kind=="virtual_fx" and rate is not None:
+                observed_rate=D(rate)
+                if not Decimal("100")<=observed_rate<=Decimal("10000"):
+                    raise ValueError("invalid historical exchange rate")
         event_map={key:rate for key,kind,_,_,rate,_ in cash_events
                    if kind=="virtual_fx" and rate is not None}
         metadata={(account,request):{"foreign_exchange_rate":rate,
