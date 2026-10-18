@@ -26,6 +26,7 @@ from .stage1_quotes import verified_quote
 from .stage1_research import current_fx
 from .stage1_portfolios import ISA_ETF_ALLOWED
 from .stage1_market_store import MarketStore
+from .stage6_risk import review_candidate
 
 KST=ZoneInfo("Asia/Seoul")
 MODEL="stage4-v1"
