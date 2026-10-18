@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, ty
 import { Link, useParams } from "react-router-dom";
 import { api, ApiError } from "./api";
 import { safeCatalogItem } from "./catalog";
+import { ManualAssetsPanel } from "./ManualAssetsPanel";
 import { sliderValue, totalGuidance } from "./decimal";
 import { displayScope, formatDateTime, formatKrw } from "./format";
 import { useLoad } from "./hooks";
@@ -106,6 +107,7 @@ export function AssetsPage() {
   return <>
     <PageHeader eyebrow="PORTFOLIO" title="내 자산 · 월별 정리" description="현재 인증된 사용자의 검증된 원장과 월별 스냅샷만 표시합니다." />
     <LoadMessage loading={state.loading} error={state.error} />
+    <ManualAssetsPanel />
     {state.data && <>
       <div className={`scope-banner ${state.data.data_scope === "SAMPLE" ? "sample" : ""}`}><strong>{displayScope(state.data.data_scope)}</strong><span>기준 {formatDateTime(state.data.as_of)}</span>{state.data.stale && <span className="badge warning">미갱신</span>}</div>
       <section className="metric-grid portfolio-metrics" aria-label="포트폴리오 요약">
