@@ -12,6 +12,7 @@ import os
 import re
 import sqlite3
 import stat
+import tempfile
 from collections import defaultdict
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
@@ -342,6 +343,7 @@ def verify_backup_copy(portfolios,filename,owner,*,directory=None):
     with target.open("rb") as fh:
         for chunk in iter(lambda:fh.read(1024*1024),b""):
             checksum.update(chunk)
+    integrity_ok=False;staged=False;counts={};restore_issue=None
     try:
         with closing(_readonly(target)) as db:
             result=db.execute("PRAGMA integrity_check").fetchone()
@@ -349,19 +351,45 @@ def verify_backup_copy(portfolios,filename,owner,*,directory=None):
                 "SELECT name FROM sqlite_master WHERE type='table'")}
             required={"virtual_orders","portfolio_transfers","stage1_events","portfolios"}
             integrity_ok=bool(result and result[0]=="ok" and required<=schema)
-            counts={}
             if integrity_ok:
                 for table in sorted(required):
                     counts[table]=db.execute(
                         f"SELECT COUNT(*) FROM {table} WHERE owner=?",(owner,)).fetchone()[0]
-    except (sqlite3.Error,OSError,ValueError):
-        integrity_ok=False;counts={}
-    return {"status":"structurally_verified" if integrity_ok else "unusable",
+                if target.stat().st_size>200*1024*1024:
+                    restore_issue="TEMPORARY_DRILL_TOO_LARGE"
+                else:
+                    # Restore into an isolated throwaway directory, never the
+                    # live source, its WAL/SHM or a user-selectable path.
+                    with tempfile.TemporaryDirectory(prefix=".stage7-restore-",
+                                                      dir=backup_dir) as tmpdir:
+                        fd,tmp=tempfile.mkstemp(prefix="stage7-",suffix=".sqlite3",
+                                                dir=tmpdir)
+                        os.close(fd)
+                        with closing(sqlite3.connect(tmp,timeout=10)) as clone:
+                            db.backup(clone)
+                            verified=clone.execute("PRAGMA integrity_check").fetchone()
+                            if not verified or verified[0]!="ok":
+                                raise ValueError("temporary restore integrity check failed")
+                            for table in sorted(required):
+                                if clone.execute(
+                                    f"SELECT COUNT(*) FROM {table} WHERE owner=?",
+                                    (owner,)).fetchone()[0]!=counts[table]:
+                                    raise ValueError("temporary restore row count mismatch")
+                            staged=True
+    except (sqlite3.Error,OSError,ValueError) as error:
+        if not integrity_ok:
+            integrity_ok=False
+        restore_issue=type(error).__name__
+    state=("unusable" if not integrity_ok else
+           "structurally_verified" if staged else "staging_unavailable")
+    return {"status":state,
             "filename":filename,"sha256_computed_now":checksum.hexdigest(),
             "trusted_manifest_hash_verified":False,
             "sqlite_integrity_check_ok":integrity_ok,
+            "temporary_restore_drill_ok":staged,
+            "temporary_restore_issue":restore_issue,
             "owner_rows":counts,
             "restore_performed":False,"source_overwritten":False,
             "includes":["가상거래·가상입금·계좌·승인 등이 포함된 paper SQLite"],
             "not_included":["로그인/관리자 DB","시장자료 캐시","외부 키·자격증명"],
-            "notice":"이 검사는 사본의 SQLite 복원 가능성만 점검합니다. 이전에 보관된 신뢰 SHA와의 일치는 확인하지 않으며 실제 복원을 수행하지 않습니다."}
+            "notice":"임시 격리 공간에서 SQLite 사본 복원/무결성/행수를 시험한 뒤 자동 삭제합니다. 실제 운영 원장은 절대 덮어쓰지 않습니다. 신뢰할 수 있는 기존 SHA 기준값과의 일치는 별도 확인이 필요합니다."}
