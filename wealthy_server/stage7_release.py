@@ -68,7 +68,7 @@ def _path_checked(path):
 
 
 def _readonly(path):
-    p=_path_checked(path)
+    p=_path_checked(path).resolve(strict=True)
     db=sqlite3.connect(p.as_uri()+"?mode=ro",uri=True,timeout=10,
                        isolation_level=None)
     try:
