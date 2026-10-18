@@ -108,14 +108,33 @@ export function Stage1Page(){
   async function reloadInbox(){try{const data=await get<{items:InboxMessage[];unread:number}>('/api/v1/stage1/inbox');setInboxItems(data.items);setUnreadCount(data.unread);}catch(e){setError(String(e));}}
   async function markInboxRead(id:string){await action(async()=>{const data=await post<{items:InboxMessage[];unread:number}>('/api/v1/stage1/inbox/read',{event_id:id});setInboxItems(data.items);setUnreadCount(data.unread);},'알림을 읽음 처리했습니다.');}
 
+  type ReleaseAudit={status:'healthy'|'warning'|'blocked';checked_utc:string;blocking_count:number;warning_count:number;issues:{code:string;detail:string;blocking:boolean}[];counts:{accounts?:number;orders?:number;events?:number;stage4_claims?:number;nav_snapshots?:number};read_only:boolean;repair_performed:boolean;paper_execution_permitted_by_integrity:boolean;note:string};
+  type BackupPreflight={status:'structurally_verified'|'unusable';filename:string;sha256_computed_now:string;trusted_manifest_hash_verified:boolean;sqlite_integrity_check_ok:boolean;owner_rows:Record<string,number>;restore_performed:boolean;notice:string};
+  const [releaseAudit,setReleaseAudit]=useState<ReleaseAudit|null>(null);
+  const [backupPreflight,setBackupPreflight]=useState<BackupPreflight|null>(null);
+  const [backupVerifyBusy,setBackupVerifyBusy]=useState(false);
+  async function verifyPaperBackup(filename:string){
+    setBackupVerifyBusy(true);setError('');
+    try{
+      const report=await get<BackupPreflight>('/api/v1/stage1/backups/'+encodeURIComponent(filename)+'/verify');
+      setBackupPreflight(report);
+    }catch(e){setBackupPreflight(null);setError(String(e));}
+    finally{setBackupVerifyBusy(false);}
+  }
   type PaperBackup={filename:string;bytes:number;modified_utc:string};
   const [paperBackups,setPaperBackups]=useState<PaperBackup[]>([]);
   type StorageHealth={schema_version:number;current_version:number;migration_complete:boolean;backup_created:boolean;sqlite_quick_check:boolean;owner_audit:{trade_receipts:number;accounting:{category:string;status:string;count:number}[];corporate:{category:string;status:string;count:number}[]}};
   const [storageHealth,setStorageHealth]=useState<StorageHealth|null>(null);
-  async function reloadBackups(){try{const [backups,health]=await Promise.all([
-    get<{items:PaperBackup[]}>('/api/v1/stage1/backups'),
-    get<StorageHealth>('/api/v1/stage1/storage-health')
-  ]);setPaperBackups(backups.items);setStorageHealth(health);}catch(e){setError(String(e));}}
+  async function reloadBackups(){try{
+    const results=await Promise.allSettled([
+      get<{items:PaperBackup[]}>('/api/v1/stage1/backups'),
+      get<StorageHealth>('/api/v1/stage1/storage-health'),
+      get<ReleaseAudit>('/api/v1/stage1/release-integrity')]);
+    if(results[0].status==='fulfilled')setPaperBackups(results[0].value.items);
+    if(results[1].status==='fulfilled')setStorageHealth(results[1].value);
+    if(results[2].status==='fulfilled')setReleaseAudit(results[2].value);
+    else setReleaseAudit(null);
+  }catch(e){setError(String(e));}}
   async function createPaperBackup(){await action(async()=>{await post('/api/v1/stage1/backups',{});await reloadBackups();},'가상 원장 백업과 무결성 검사가 완료되었습니다.');}
 
   const [approvals,setApprovals]=useState<Approval[]>([]);
@@ -322,7 +341,7 @@ export function Stage1Page(){
             <p>이동평균 추세: {research.trend==='uptrend'?'상승 추세 조건 충족':'상승 추세 조건 미충족'}</p>
             <p>간단 백테스트 수익률: {research.backtest?.return_pct}% / 같은 기간 단순 보유: {research.backtest?.buy_hold_return_pct}%</p>
             <small>가정: {research.backtest?.assumptions} · 거래당 수수료 가정 {research.backtest?.fee_bps_per_trade}bp</small>
-            <p className="s1-desc">8전략 중 현재 자동 계산 가능한 요소: 모멘텀 1개. 재무·배당 자료가 확인되지 않은 7개 전략은 점수나 투자 신호를 생성하지 않습니다.</p></>
+            <p className="s1-desc">이 영역은 기존 미국 종가 연구 도구입니다. 3단계에서는 검증 자료가 있을 때 8개 전략별 연구 점수를 별도로 산출합니다. 6단계에서 가격만으로 과거 재현한 규칙은 모멘텀 1개이며, 다른 전략의 실제 과거수익률 검증은 아직 지원하지 않습니다.</p></>
             :<p>분석 불가: {research.reason}. 자료가 없을 때 임의 수익률을 표시하지 않습니다.</p>}</div>}
       </section>
       <section className="s1-panel"><div className="s1-panelhead"><h2>미국 ETF·주식 조사 후보</h2><button className="s1-outline" disabled={loadingCandidates} onClick={()=>void discover()}>{loadingCandidates?'시세 조회 중…':'후보·가격 새로고침'}</button></div>
@@ -335,12 +354,38 @@ export function Stage1Page(){
       <p className="s1-desc">국내 주식은 비공식 공개 지연 종가를 검증한 경우에만 모의 거래가 가능합니다. 미국 주식도 주문 순간 서버에서 가격을 재확인합니다.</p>
       </section>
     </div>}
+    {section==='overview'&&<section className="s1-panel">
+      <div className="s1-panelhead"><h2>7단계 · 원장 통합 감사·복원 안전검사</h2>
+        <button className="s1-outline" disabled={busy} onClick={()=>void reloadBackups()}>감사 새로고침</button></div>
+      <div className="s1-balances">
+        <div><small>원장 통합 상태</small><strong>{releaseAudit?.status==='healthy'?'정상':
+          releaseAudit?.status==='warning'?'주의 / 원장 확인 필요':
+          releaseAudit?.status==='blocked'?'주문 차단':'검증 대기'}</strong></div>
+        <div><small>주문 차단 결함</small><strong>{releaseAudit?.blocking_count??'–'}건</strong></div>
+        <div><small>실행 전 재검증</small><strong>{releaseAudit?.paper_execution_permitted_by_integrity?'통과':'검토 필요'}</strong></div>
+      </div>
+      <p className="s1-desc">입금·환전·계좌 간 이체·가상 주문수량·현금 잔고·중단 주문 요청·일별 NAV 해시를 사용자 원장에서 읽기 전용으로 대조합니다. 이 화면에서 데이터 자동수정이나 실계좌 거래는 하지 않습니다.</p>
+      {releaseAudit?.issues.length?releaseAudit.issues.map((x,i)=><p className="s1-desc" key={i}>
+        <b>{x.blocking?'차단':'주의'} · {x.code}</b> — {x.detail}</p>):
+        <p className="s1-desc">현재 확인된 원장 결함이 없습니다. 공개 시세·환율과 주문 위험 검사는 별도로 필요합니다.</p>}
+      <p className="s1-desc">최종 검사: {releaseAudit?.checked_utc??'실행 전'} · 읽기 전용 원장 감사. 문제가 발견되면 기존 데이터를 삭제하거나 DB 파일을 직접 덮어쓰지 마세요.</p>
+    </section>}
     {section==='overview'&&<section className="s1-panel"><div className="s1-panelhead"><h2>모의계좌 온라인 백업</h2><button className="s1-primary" disabled={busy} onClick={()=>void createPaperBackup()}>지금 백업</button></div>
       <p className="s1-desc">백업은 가상투자 SQLite 원장만 대상으로 합니다. 관리자 로그인·시장 DB는 별도입니다. 무결성 검사를 통과한 파일만 저장하며 이 화면에서는 복원을 실행하지 않습니다.</p>
       <p className="s1-desc">원장 스키마: {storageHealth ? 'Stage1 v'+storageHealth.schema_version : '검사 대기'} · DB 무결성: {storageHealth ? (storageHealth.sqlite_quick_check?'정상':'검사 실패') : '검사 대기'} · 주문 근거: {storageHealth?.owner_audit.trade_receipts??'–'}건</p>
        <p className="s1-desc">배당·비용 근거: {storageHealth?.owner_audit.accounting.reduce((a,x)=>a+x.count,0)??'–'}건 · 기업행위 근거: {storageHealth?.owner_audit.corporate.reduce((a,x)=>a+x.count,0)??'–'}건 · 금액은 이후 대조 엔진에서 반영</p>
        <p className="s1-desc">수동 백업 {paperBackups.length}개 · 기존 데이터가 있으면 스키마 변경 전 별도 자동 백업 생성</p>
-      {paperBackups.slice(0,5).map(b=><p key={b.filename}>{b.filename} · {money(b.bytes)} B · {b.modified_utc}</p>)}
+      {paperBackups.slice(0,5).map(b=><div key={b.filename} className="s1-candidate">
+        <p className="s1-desc">{b.filename} · {money(b.bytes)} B · {b.modified_utc}</p>
+        <button className="s1-outline" disabled={busy||backupVerifyBusy}
+          onClick={()=>void verifyPaperBackup(b.filename)}>복원 전 안전검사</button>
+      </div>)}
+      {backupPreflight&&<div className="s1-candidate">
+        <h3>{backupPreflight.filename} · {backupPreflight.status==='structurally_verified'?'SQLite 구조 검사 통과':'복원 대상 부적합'}</h3>
+        <p className="s1-desc">현재 계산 SHA-256: {backupPreflight.sha256_computed_now}</p>
+        <p className="s1-desc">{backupPreflight.notice}</p>
+        <p className="s1-desc">이번 검사는 실제 복원 {backupPreflight.restore_performed?'실시':'미실시'}, 관리자·시장자료 DB는 백업에 포함되지 않습니다.</p>
+      </div>}
     </section>}
     {section==='overview'&&<section className="s1-panel"><h2>자동 입금 배분 · 별도 입력 불필요</h2><p className="s1-desc">시장에서 설정한 미국/한국 비중과 ETF/개별주 비중을 기준으로 앞으로 들어오는 월 35만원을 자동 배분합니다. 기존 입금·거래는 변경하지 않습니다.</p>
       <div className="s1-balances"><div><small>미국 일반계좌</small><strong>{fundingPolicy.us_pct}%</strong></div><div><small>한국 일반계좌</small><strong>{fundingPolicy.kr_pct}%</strong></div><div><small>ISA 가상계좌</small><strong>{fundingPolicy.isa_pct}%</strong></div></div>
