@@ -61,6 +61,7 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
   const [market,setMarket]=useState('ALL');
   const [kind,setKind]=useState('ALL');
   const [catalog,setCatalog]=useState<Catalog|null>(null);
+  const [screen,setScreen]=useState<{screened:number;ready:number;items:{symbol:string;status:string;score:number|null;coverage_pct:number}[]}|null>(null);
   const [selected,setSelected]=useState<Security|null>(null);
   const [selectedQuote,setSelectedQuote]=useState<{status:string;price?:string;currency?:string;as_of?:string;source?:string}|null>(null);
   const [riskUnread,setRiskUnread]=useState(0);
@@ -279,6 +280,9 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
        <select value={kind} onChange={e=>setKind(e.target.value)}><option value="ALL">전체 상품</option><option value="STOCK">개별주</option><option value="ETF">ETF</option></select>
        <button disabled={busy} onClick={()=>void refreshCatalog()}>전체 목록 갱신</button></div>
        <div className="wh-catalog"><div className="wh-searchresults"><div className="wh-head"><b>검색 결과 {fmt(catalog?.total)}개</b><small>한 번에 최대 50종목</small></div>
+         <button disabled={busy} onClick={()=>{setScreen(null);void read<{screened:number;ready:number;items:{symbol:string;status:string;score:number|null;coverage_pct:number}[]}>('/api/v1/stage1/screen?'+new URLSearchParams({q:query,market,kind,limit:'20'})).then(setScreen).catch(()=>setError('정량 검색 결과를 확인할 수 없습니다.'));}}>현재 검색조건 상위 20개 정량 평가</button>
+         {screen&&<div role="status"><b>평가 {screen.screened}종 · 분석 가능 {screen.ready}종</b><small>미확인 전략은 점수를 임의로 채우지 않습니다. 자동매매와 분리된 참고 정보입니다.</small>
+           {screen.items.map(x=><p key={x.symbol}>{x.symbol} · {x.score===null?'자료 부족':x.score+'점'} · 충족률 {x.coverage_pct??0}%</p>)}</div>}
          {(catalog?.items??[]).map(x=><button key={x.market+x.symbol} onClick={()=>void openSecurity(x)}><b>{x.symbol}</b><span>{x.name}</span><small>{x.market} · {x.kind}</small></button>)}
          {!catalog?.items.length&&<p>검색 결과가 없습니다. 공개 목록 갱신을 시도해 보세요.</p>}</div>
        <div className="wh-security"><h3>종목 상세</h3>{selected?<><h2>{selected.name}</h2><p>{selected.symbol} · {selected.market} · {selected.kind}</p>
