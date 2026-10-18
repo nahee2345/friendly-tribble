@@ -129,3 +129,16 @@ def test_elevated_risk_and_weekend_paper_execution_rules_not_disabled():
     cap=Decimal(result["weekday_replay"]["risk_budget_krw"])
     assert cap==Decimal(4000000)*DAY_LIMIT_PCT
     assert result["market_closed_check"]["orders_executed"]==0
+
+
+def test_stage8_candidate_selection_explanation_is_explicitly_not_live_market_advice():
+    run,close=next_simulated_session(datetime(2026,10,18,9,0,tzinfo=timezone.utc))
+    report=_uncommitted_scenario(run,close)
+    notes=report["decision_explanation"]
+    assert notes["verified_live_data_used"] is False
+    assert notes["no_historical_market_fact"] is True
+    assert "840000원" in notes["voo_not_bought"]
+    assert "126000원" in notes["spym"]
+    assert "3주" in notes["kospi200"]
+    assert report["market_closed_check"]["orders_executed"]==0
+    assert report["weekday_replay"]["estimated_spend_krw"]=="186000"
