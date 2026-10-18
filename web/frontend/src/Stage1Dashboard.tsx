@@ -240,7 +240,7 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
         {!hub&&actualAccounts.length===0&&<p>실제 가상계좌 데이터 확인 중</p>}</section>
       <section className="wh-card wh-news"><div className="wh-head"><b>최근 30일 뉴스·보유종목 영향</b><small>{news?.summary.checked??0}건 검토 · 관련 {news?.summary.related??0}건</small></div>
         <div className="wh-feed">{(news?.news??[]).slice(0,5).map((n,i)=><div className="wh-newsrow" key={i}><span className={n.impact==='하방 위험 의심'?'wh-danger':''}>{n.impact}</span><a href={n.url} target="_blank" rel="noreferrer">{n.title}</a><small>{n.symbols.join(', ')||n.market}</small></div>)}
-          {!news?.news.length&&<p>최근 30일 기사를 아직 확인하지 못했습니다.</p>}</div>
+          {!news?.news.length&&<p>{news?.status==='partial'?'일부 뉴스 공급원 연결이 실패했습니다. 검토 가능한 뉴스가 부족합니다.':news?.status==='ok'?'검색 범위에서 확인된 기사가 없습니다. 뉴스가 없다는 뜻은 아닙니다.':'뉴스 수집을 완료하지 못했습니다. 네트워크와 공개 RSS 제공 상태를 확인하세요.'}</p>}</div>
         <small className="wh-caveat">제목 기반 관련성 분석이며 실제 가격 영향은 미확인입니다.</small></section>
       <section className="wh-card wh-risks"><div className="wh-head"><b>보유종목 위험 알림</b>
         <button className="wh-plan-trigger" onClick={()=>setShowRiskReview(true)}
