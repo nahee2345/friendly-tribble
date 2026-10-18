@@ -859,6 +859,22 @@ def create_app(
             quantity: str
             side: str
 
+        class ManualBalanceBody(BaseModel):
+            label: str
+            currency: str
+            amount: str
+            side: str
+
+        @app.post("/api/v1/stage1/manual-assets/balance")
+        def stage10_adjust_manual_balance(body: ManualBalanceBody,
+                                           actor: Actor = Depends(mutation_actor)) -> dict[str, Any]:
+            from .stage10_manual_assets import adjust_balance
+            try:
+                return adjust_balance(portfolio_store,actor.owner_id,body.label,
+                                      body.currency,body.amount,body.side)
+            except ValueError:
+                raise _error(400,"INVALID_MANUAL_BALANCE","자산 이름·통화·금액을 확인해 주세요.") from None
+
         @app.get("/api/v1/stage1/manual-assets")
         def stage10_manual_assets(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
             from .stage10_manual_assets import list_assets
