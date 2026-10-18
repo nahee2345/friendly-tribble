@@ -104,7 +104,7 @@ def news_30d(*,now=None,fetcher=None,limit=30):
                 item["title_ko"]=translated
                 item["translation_status"]="translated_external" if translated else "translation_unavailable"
     return {"items":items,"status":"partial" if missing and items else "unavailable" if not items else "ok","unavailable":missing,
-            "coverage":"공개 Google News RSS 검색의 최근 30일 결과 일부. 모든 기사·원문 분석 보장 안 함"}
+            "coverage":"공개 언론사 및 뉴스 검색 RSS의 최근 30일 결과 일부. 전체 기사·원문 분석 보장 안 함"}
 
 def _fetch_rss(query,market,language):
     params={"q":query,"hl":"ko","gl":"KR","ceid":"KR:ko"} if language=="ko" else {
@@ -151,7 +151,8 @@ def _fetch_rss(query,market,language):
                            "한국경제" if "hankyung.com" in link else
                            "연합뉴스" if "yna.co.kr" in link else "언론사 미확인")
             editorial,source_url=_editorial_context(publisher) if market=="KR" else ("해당 없음",None)
-            items.append({"title":title,"url":link,"published":pub,"source":"Google News RSS",
+            feed_source="Google News RSS" if "news.google.com" in link else publisher+" RSS"
+            items.append({"title":title,"url":link,"published":pub,"source":feed_source,
                           "publisher":publisher,"editorial_lean":editorial,
                           "editorial_source":source_url,
                           "editorial_basis":"과거 연구의 매체별 분류로, 현재 해당 기사나 언론사의 고정된 정치색을 증명하지 않습니다."})
