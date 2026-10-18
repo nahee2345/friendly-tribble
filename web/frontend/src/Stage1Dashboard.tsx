@@ -225,7 +225,7 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
         </button></div>
         {(riskReview?.alerts??[]).slice(0,2).map((item,i)=><button className="wh-riskrow" key={'quant'+i}
           onClick={()=>setShowRiskReview(true)}><b>{item.symbol}</b> {item.reason}</button>)}
-        {(news?.risk_suspected??[]).slice(0,(riskReview?.alerts.length??0)>0?1:3).map((n,i)=><button className="wh-riskrow" key={i} onClick={()=>setSelectedRisk(n)}><b>{n.symbols.join(', ')}</b> {n.title}</button>)
+        {(news?.risk_suspected??[]).slice(0,(riskReview?.alerts.length??0)>0?1:3).map((n,i)=><button className="wh-riskrow" key={i} onClick={()=>setSelectedRisk(n)}><b>{n.symbols.join(', ')}</b> {n.title}</button>)}
         {!news?.risk_suspected.length&&!riskReview?.alerts.length&&<p>현재 검증된 부정 기사·가격 위험 신호가 없습니다. 위험이 없다는 뜻은 아닙니다.</p>}
         <small className="wh-caveat">뉴스가 손실을 확정한다는 뜻이 아닙니다. 서버 가동 중 확인 후 알림함에 저장됩니다.</small></section>
       <section className="wh-card wh-recs"><div className="wh-head"><b>정량 투자 검토 종목</b>
