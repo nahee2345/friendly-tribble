@@ -218,9 +218,15 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
         <div className="wh-feed">{(news?.news??[]).slice(0,5).map((n,i)=><div className="wh-newsrow" key={i}><span className={n.impact==='하방 위험 의심'?'wh-danger':''}>{n.impact}</span><a href={n.url} target="_blank" rel="noreferrer">{n.title}</a><small>{n.symbols.join(', ')||n.market}</small></div>)}
           {!news?.news.length&&<p>최근 30일 기사를 아직 확인하지 못했습니다.</p>}</div>
         <small className="wh-caveat">제목 기반 관련성 분석이며 실제 가격 영향은 미확인입니다.</small></section>
-      <section className="wh-card wh-risks"><div className="wh-head"><b>보유종목 위험 알림</b><small>{news?.summary.risk_suspected??0}건 의심 · 원문 연결</small></div>
-        {(news?.risk_suspected??[]).slice(0,3).map((n,i)=><button className="wh-riskrow" key={i} onClick={()=>setSelectedRisk(n)}><b>{n.symbols.join(', ')}</b> {n.title}</button>)}
-        {!news?.risk_suspected.length&&<p>현재 수집 범위에서 보유종목 관련 부정 제목을 확인하지 못했습니다.</p>}
+      <section className="wh-card wh-risks"><div className="wh-head"><b>보유종목 위험 알림</b>
+        <button className="wh-plan-trigger" onClick={()=>setShowRiskReview(true)}
+          title="과거 변동성·상관관계·가정 충격·위험 근거 확인">
+          정량위험 {riskReview?.alerts.length??0}건 · 상세 ›
+        </button></div>
+        {(riskReview?.alerts??[]).slice(0,2).map((item,i)=><button className="wh-riskrow" key={'quant'+i}
+          onClick={()=>setShowRiskReview(true)}><b>{item.symbol}</b> {item.reason}</button>)}
+        {(news?.risk_suspected??[]).slice(0,(riskReview?.alerts.length??0)>0?1:3).map((n,i)=><button className="wh-riskrow" key={i} onClick={()=>setSelectedRisk(n)}><b>{n.symbols.join(', ')}</b> {n.title}</button>)
+        {!news?.risk_suspected.length&&!riskReview?.alerts.length&&<p>현재 검증된 부정 기사·가격 위험 신호가 없습니다. 위험이 없다는 뜻은 아닙니다.</p>}
         <small className="wh-caveat">뉴스가 손실을 확정한다는 뜻이 아닙니다. 서버 가동 중 확인 후 알림함에 저장됩니다.</small></section>
       <section className="wh-card wh-recs"><div className="wh-head"><b>정량 투자 검토 종목</b>
         <button className="wh-plan-trigger" onClick={()=>setShowPlan(true)}
@@ -264,6 +270,44 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
          <p>종목 검색은 자동매수 승인과 다릅니다. 검증되지 않은 데이터는 체결에 사용하지 않습니다.</p></>:<p>왼쪽에서 종목을 선택해 주세요.</p>}
          <small>{catalog?.notice??'종목목록 범위 확인 중'}</small></div></div>
       </main>}
+    {showRiskReview&&<div className="wh-overlay" onClick={()=>setShowRiskReview(false)}>
+      <div className="wh-modal" role="dialog" aria-modal="true" aria-label="6단계 보유종목 위험 검토" onClick={e=>e.stopPropagation()}>
+        <div className="wh-head"><b>6단계 변동성·집중도·스트레스 분석</b><button onClick={()=>setShowRiskReview(false)} aria-label="닫기">✕</button></div>
+        <div className="wh-slide">
+          <p>검증 상태: <b>{riskReview?.status==='complete'?'보유종목 평가 가능':'일부 시세 미확인'}</b>
+            · 과거 원화 기준 전체 변동성은 미산정(보유수량 및 환율 시계열 부족)</p>
+          <h4>보유종목의 과거 위험</h4>
+          {riskReview?.holdings.length?riskReview.holdings.map((x,i)=><p key={x.account+x.symbol+i}>
+            <b>{x.symbol}</b> · {x.account} · 평가 {x.value_krw===null?'미확인':'₩'+fmt(x.value_krw)}
+            {x.risk?<span> · 연환산 변동성 {x.risk.annualized_volatility_pct}%
+              · 최대낙폭 {x.risk.max_drawdown_pct}% · 과거 하위5% 일수익 {x.risk.historical_5pct_daily_return_pct}%</span>:
+              <span> · 65개 이상 검증 종가 부족</span>}
+            {x.source&&<a href={x.source.url} target="_blank" rel="noreferrer"> 원본 ↗</a>}
+          </p>):<p>아직 보유종목이 없습니다.</p>}
+          <h4>동일 통화 기준 위험·집중</h4>
+          {riskReview?.currency_proxies.map((x,i)=><p key={i}>{x.currency}
+            {x.risk?' · 변동성 '+x.risk.annualized_volatility_pct+'%, 낙폭 '+x.risk.max_drawdown_pct+'%':' · 공통 자료 부족'}
+            <small> · 현재 투자 비중 고정, 실제 과거 자산 흐름과 다름</small></p>)}
+          {riskReview?.concentration.filter(x=>x.alert).map((x,i)=><p key={'con'+i}>
+            <b>{x.symbol}</b> · 투자자산 중 {x.share_of_invested_assets_pct}% 집중 주의</p>)}
+          {riskReview?.possible_etf_index_overlap.map((x,i)=><p key={'ov'+i}>
+            {x.symbols.join(' / ')} · {x.reason}</p>)}
+          <h4>가정 충격 손실 (확률 예측 아님)</h4>
+          {riskReview?.stress?<p>개별주 -20%, ETF -12%, 미국상장 상품 원/달러 -7% 동시 가정:
+            <b> ₩{fmt(riskReview.stress.estimated_loss_krw)} </b>평가액 변화.
+            <small> 배당·금리·급변 거래비용 제외</small></p>:
+            <p>보유 종목의 검증 시세·환율 자료 부족으로 가정 손실을 산정하지 않았습니다.</p>}
+          <h4>정량 위험 알림·근거</h4>
+          {riskReview?.alerts.length?riskReview.alerts.map((x,i)=><p key={i}>
+            <b>{x.symbol}</b> · {x.reason}
+            {x.source&&<a href={x.source.url} target="_blank" rel="noreferrer"> 출처 ↗</a>}
+          </p>):<p>현재 계산 가능한 범위에 추가 위험 알림 없음</p>}
+          {riskReview?.valuation_missing.map((x,i)=><p key={'miss'+i}>검증 부족: {x}</p>)}
+          <p>뉴스 위험 알림과 별개입니다. 6단계 위험 신호만으로 자동 매도하지 않으며,
+            신규매수는 위험과 현금·주문 검사를 모두 통과해야 합니다.</p>
+        </div>
+      </div>
+    </div>}
     {showAccounting&&<div className="wh-overlay" onClick={()=>setShowAccounting(false)}>
       <div className="wh-modal" role="dialog" aria-modal="true" aria-label="5단계 자산별 손익·환율·배당·세금 분석" onClick={e=>e.stopPropagation()}>
         <div className="wh-head"><b>5단계 회계·세후 시나리오</b><button onClick={()=>setShowAccounting(false)} aria-label="닫기">✕</button></div>
