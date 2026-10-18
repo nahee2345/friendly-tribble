@@ -16,7 +16,7 @@ def import_listing(portfolios, filename, *, market, source, at=None, max_rows=20
     if not isinstance(at,datetime) or at.tzinfo is None:
         raise ValueError("timezone required")
     stamp=at.astimezone(timezone.utc).isoformat()
-    pattern=r"[A-Z][A-Z0-9.\\-]{0,14}" if market=="US" else r"[0-9]{6}"
+    pattern=r"[A-Z][A-Z0-9.-]{0,14}" if market=="US" else r"[0-9]{6}"
     rows=[];seen=set()
     with path.open(encoding="utf-8-sig",newline="") as f:
         rd=csv.DictReader(f)
