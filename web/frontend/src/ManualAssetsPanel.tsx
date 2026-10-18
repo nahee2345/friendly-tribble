@@ -70,3 +70,26 @@ export function ManualAssetsPanel(){
     </details>
   </section>;
 }
+
+export function ManualAssetsSummary(){
+  const [data,setData]=useState<Result|null>(null);
+  const [error,setError]=useState(false);
+  useEffect(()=>{let active=true;
+    void request<Result>('/api/v1/stage1/manual-assets')
+      .then(r=>{if(active)setData(r);}).catch(()=>{if(active)setError(true);});
+    return()=>{active=false;};
+  },[]);
+  return <section className="card manual-summary" aria-label="직접 등록한 자산 요약">
+    <div className="card-title"><h2>직접 등록한 자산</h2><a href="/settings">설정에서 관리 →</a></div>
+    <p>아래 자료는 직접 입력한 기록입니다. 실제 증권사 계좌·자동 모의투자·총자산 평가에는 합산하지 않습니다.</p>
+    {error&&<p role="status">직접 입력한 자산 조회 실패 · 설정에서 로그인·저장 상태 확인</p>}
+    {data&&<>
+      <h3>보유주식 · {data.items.length}종</h3>
+      {!data.items.length&&<p>직접 등록한 주식이 없습니다.</p>}
+      {data.items.map(item=><p key={item.account+item.symbol+item.currency}>{item.symbol} · {item.quantity}주 · {item.currency}</p>)}
+      <h3>기타 자산 · {data.balances.length}건</h3>
+      {!data.balances.length&&<p>직접 등록한 현금성 자산이 없습니다.</p>}
+      {data.balances.map(item=><p key={item.label+item.currency}>{item.label} · {item.amount} {item.currency}</p>)}
+    </>}
+  </section>;
+}
