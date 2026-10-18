@@ -564,6 +564,7 @@ def create_app(
             normal idempotent Stage1 bootstrap, with no fictitious fill.
             """
             from .stage8_sandbox import sandbox_preview
+            from decimal import Decimal
             initialize_paper_accounts(actor.owner_id,stage1,portfolio_store)
             accounts=portfolio_store.list(actor.owner_id)["accounts"]
             with portfolio_store._db() as db:
