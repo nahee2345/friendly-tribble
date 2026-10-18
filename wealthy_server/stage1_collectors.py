@@ -12,7 +12,7 @@ import re
 import time
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from decimal import Decimal, InvalidOperation
 from email.utils import parsedate_to_datetime
 
@@ -22,6 +22,67 @@ from .stage1_analytics import fetch_daily_history
 from .stage1_history30 import last_30_days
 from .stage1_research import current_fx
 from .stage1_hub import news_30d
+
+
+def kr_research_history(market,symbol,*,now=None,opener=None):
+    """Keyless Yahoo daily *research history* (up to 1y, 65+ sessions).
+
+    The existing last_30_days() is a chart preview, NOT enough for reliable
+    covariance or 63-session volatility. Verify all symbol/currency/dates
+    before letting the immutable Stage2 cache validate it again.
+    """
+    if market!="KR" or not isinstance(symbol,str) or not re.fullmatch(r"[0-9]{6}",symbol):
+        return {"status":"unavailable","reason":"INVALID_KR_SYMBOL","symbol":symbol}
+    clock=now or datetime.now(timezone.utc)
+    if clock.tzinfo is None:
+        return {"status":"unavailable","reason":"INVALID_TIME"}
+    fetch=opener or urllib.request.urlopen
+    for suffix in (".KS",".KQ"):
+        ticker=symbol+suffix
+        url=("https://query1.finance.yahoo.com/v8/finance/chart/"+
+             urllib.parse.quote(ticker,safe="")+"?range=1y&interval=1d")
+        try:
+            req=urllib.request.Request(url,headers={"User-Agent":"Mozilla/5.0 WealthyPersonalResearch"})
+            with fetch(req,timeout=8) as response:
+                raw=response.read(800001)
+            if len(raw)>800000:
+                raise ValueError("oversized public chart")
+            data=json.loads(raw)["chart"]["result"][0]
+            meta=data["meta"]
+            if meta.get("symbol","").upper()!=ticker or meta.get("currency")!="KRW":
+                raise ValueError("public chart ticker/currency mismatch")
+            ts=data["timestamp"]
+            closes=data["indicators"]["quote"][0]["close"]
+            if not isinstance(ts,list) or not isinstance(closes,list) or len(ts)!=len(closes):
+                raise ValueError("price array mismatch")
+            prices=[]
+            for stamp_,price in zip(ts,closes):
+                if price is None:continue
+                day=datetime.fromtimestamp(int(stamp_),timezone.utc).date()
+                if day>clock.date() or day<clock.date()-timedelta(days=370):
+                    continue
+                amount=Decimal(str(price))
+                if not amount.is_finite() or amount<=0 or amount>Decimal("100000000"):
+                    raise ValueError("invalid reference close")
+                prices.append({"date":day.isoformat(),"close":str(amount)})
+            prices.sort(key=lambda item:item["date"])
+            if not 65<=len(prices)<=300:
+                raise ValueError("insufficient 1y history")
+            if any(a["date"]>=b["date"] for a,b in zip(prices,prices[1:])):
+                raise ValueError("duplicate reference date")
+            as_of=prices[-1]["date"]
+            if (clock.date()-datetime.fromisoformat(as_of).date()).days>6:
+                raise ValueError("stale research series")
+            return {"status":"ok","symbol":symbol,"currency":"KRW",
+                    "as_of":as_of,"prices":prices,"source_url":url,
+                    "source":"Yahoo Finance unofficial daily historical close",
+                    "reference_only":True,
+                    "notice":"현물 기준 지연 종가. 배당·세금·ETF 추적오차·거래량 제외."}
+        except (OSError,KeyError,ValueError,IndexError,TypeError,OverflowError,
+                InvalidOperation,TimeoutError,json.JSONDecodeError):
+            continue
+    return {"status":"unavailable","symbol":symbol,
+            "reason":"KR_RESEARCH_HISTORY_UNVERIFIED"}
 
 
 SEC_TICKERS="https://www.sec.gov/files/company_tickers.json"
@@ -199,7 +260,7 @@ def _provider(kind,symbol):
 
 class Collector:
     def __init__(self,store,*,quote=verified_quote,history_us=fetch_daily_history,
-                 history_kr=last_30_days,fx=current_fx,news=news_30d,
+                 history_kr=kr_research_history,fx=current_fx,news=news_30d,
                  dividends=dividends_from_public_chart,fundamentals=sec_facts):
         self.store=store
         self.quote=quote;self.history_us=history_us;self.history_kr=history_kr
