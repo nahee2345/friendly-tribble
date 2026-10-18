@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
-python3 -m pytest -q tests/test_stage9_catalog_import.py tests/test_stage10_offline_research.py tests/test_stage10_screener.py
+python3 -m pytest -q tests/test_stage9_catalog_import.py tests/test_stage10_offline_research.py tests/test_stage10_screener.py tests/test_stage10_news_evidence.py
 bash scripts/stage7_acceptance.sh
 if ! command -v npm >/dev/null 2>&1; then
   echo "NOT VERIFIED: npm unavailable" >&2; exit 2
