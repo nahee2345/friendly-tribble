@@ -13,13 +13,14 @@ import re
 import sqlite3
 import stat
 from collections import defaultdict
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 RELEASE_AUDIT="stage7-readonly-audit-v1"
 CORE=("stage1_events","portfolios","portfolio_transfers","virtual_orders",
-      "stage1_schema_registry","stage1_trade_control")
+      "stage1_schema_registry")
 MAX_ROWS=50000
 ERRORS_LIMIT=35
 REQUIRED_CURRENCY={"GENERAL_OVERSEAS":"USD",
@@ -99,7 +100,7 @@ def audit_paper_ledger(owner,portfolios,*,now=None):
             findings.append({"code":code,"detail":summary,
                              "blocking":blocking})
     try:
-        with _readonly(portfolios.path) as db:
+        with closing(_readonly(portfolios.path)) as db:
             checked=db.execute("PRAGMA quick_check(1)").fetchone()
             if not checked or checked[0]!="ok":
                 issue("SQLITE_QUICK_CHECK_FAILED",
@@ -135,8 +136,9 @@ def audit_paper_ledger(owner,portfolios,*,now=None):
                                   ("isa-base","ISA_SIMULATED")):
                     if accounts.get(name)!=kind:
                         issue("DEFAULT_ACCOUNT_MISMATCH",name+" 가상계좌/유형 오류")
-            control=db.execute("""SELECT paused FROM stage1_trade_control
+            control=(db.execute("""SELECT paused FROM stage1_trade_control
                 WHERE owner=?""",(owner,)).fetchone()
+                if "stage1_trade_control" in tables else None)
             counts["paused"]=bool(control[0]) if control else True
             balances={a:{"KRW":Decimal(0),"USD":Decimal(0)} for a in accounts}
             held=defaultdict(int)
@@ -341,7 +343,7 @@ def verify_backup_copy(portfolios,filename,owner,*,directory=None):
         for chunk in iter(lambda:fh.read(1024*1024),b""):
             checksum.update(chunk)
     try:
-        with _readonly(target) as db:
+        with closing(_readonly(target)) as db:
             result=db.execute("PRAGMA integrity_check").fetchone()
             schema={x[0] for x in db.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'")}
