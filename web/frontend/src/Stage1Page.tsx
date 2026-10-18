@@ -109,7 +109,7 @@ export function Stage1Page(){
   async function markInboxRead(id:string){await action(async()=>{const data=await post<{items:InboxMessage[];unread:number}>('/api/v1/stage1/inbox/read',{event_id:id});setInboxItems(data.items);setUnreadCount(data.unread);},'알림을 읽음 처리했습니다.');}
 
   type ReleaseAudit={status:'healthy'|'warning'|'blocked';checked_utc:string;blocking_count:number;warning_count:number;issues:{code:string;detail:string;blocking:boolean}[];counts:{accounts?:number;orders?:number;events?:number;stage4_claims?:number;nav_snapshots?:number};read_only:boolean;repair_performed:boolean;paper_execution_permitted_by_integrity:boolean;note:string};
-  type BackupPreflight={status:'structurally_verified'|'unusable';filename:string;sha256_computed_now:string;trusted_manifest_hash_verified:boolean;sqlite_integrity_check_ok:boolean;owner_rows:Record<string,number>;restore_performed:boolean;notice:string};
+  type BackupPreflight={status:'structurally_verified'|'staging_unavailable'|'unusable';filename:string;sha256_computed_now:string;trusted_manifest_hash_verified:boolean;sqlite_integrity_check_ok:boolean;temporary_restore_drill_ok:boolean;temporary_restore_issue:string|null;owner_rows:Record<string,number>;restore_performed:boolean;notice:string};
   const [releaseAudit,setReleaseAudit]=useState<ReleaseAudit|null>(null);
   const [backupPreflight,setBackupPreflight]=useState<BackupPreflight|null>(null);
   const [backupVerifyBusy,setBackupVerifyBusy]=useState(false);
@@ -381,8 +381,9 @@ export function Stage1Page(){
           onClick={()=>void verifyPaperBackup(b.filename)}>복원 전 안전검사</button>
       </div>)}
       {backupPreflight&&<div className="s1-candidate">
-        <h3>{backupPreflight.filename} · {backupPreflight.status==='structurally_verified'?'SQLite 구조 검사 통과':'복원 대상 부적합'}</h3>
+        <h3>{backupPreflight.filename} · {backupPreflight.status==='structurally_verified'?'격리 공간 복원시험 통과':backupPreflight.status==='staging_unavailable'?'임시 복원시험 보류':'복원 대상 부적합'}</h3>
         <p className="s1-desc">현재 계산 SHA-256: {backupPreflight.sha256_computed_now}</p>
+        <p className="s1-desc">임시 격리 복원 결과: {backupPreflight.temporary_restore_drill_ok?'성공':backupPreflight.temporary_restore_issue??'실행 불가'}</p>
         <p className="s1-desc">{backupPreflight.notice}</p>
         <p className="s1-desc">이번 검사는 실제 복원 {backupPreflight.restore_performed?'실시':'미실시'}, 관리자·시장자료 DB는 백업에 포함되지 않습니다.</p>
       </div>}
