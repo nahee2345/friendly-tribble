@@ -48,7 +48,7 @@ function AssetGraph({data}:{data:History[]}){
   </svg>;
 }
 export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
-  const [tab,setTab]=useState<'home'|'search'>('home');
+  const [tab,setTab]=useState<'home'|'search'>(window.location.pathname==='/analysis'?'search':'home');
   const [hub,setHub]=useState<Hub|null>(null);
   const [news,setNews]=useState<NewsReport|null>(null);
   const [error,setError]=useState('');
