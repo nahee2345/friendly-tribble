@@ -55,3 +55,27 @@ def test_editorial_labels_retain_uncertainty():
     label,source=_editorial_context("한겨레")
     assert "연구" in label and source and source.startswith("https://")
     assert _editorial_context("미분류")[1] is None
+
+def test_korean_publisher_rss_fallback_when_google_fails(monkeypatch):
+    import wealthy_server.stage1_hub as hub
+    from urllib.request import Request
+    from io import BytesIO
+    class Response:
+        def __init__(self,data):self.buf=BytesIO(data)
+        def __enter__(self):return self
+        def __exit__(self,*args):return None
+        def read(self,n):return self.buf.read(n)
+    rss=b"""<?xml version="1.0" encoding="utf-8"?>
+      <rss><channel><item><title>Economy</title>
+      <link>https://www.mk.co.kr/news/stock/12345</link>
+      <pubDate>Sun, 18 Oct 2026 00:00:00 GMT</pubDate>
+      </item></channel></rss>"""
+    def get(request,timeout):
+        url=request.full_url
+        if 'news.google.com' in url:raise OSError('google unavailable')
+        if 'www.mk.co.kr/rss/' in url:return Response(rss)
+        raise AssertionError('unnecessary fallback')
+    monkeypatch.setattr(hub.urllib.request,'urlopen',get)
+    items=hub._fetch_rss('stocks','KR','ko')
+    assert len(items)==1 and items[0]['publisher']=='매일경제'
+    assert items[0]['editorial_lean']=='평가 근거 미확인'
