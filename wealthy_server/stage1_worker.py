@@ -150,4 +150,10 @@ class PaperWorker:
         self.stop_signal.set()
         if self.thread is not None:
             self.thread.join(timeout=12)
-            self.thread = None
+            if self.thread.is_alive():
+                # Shutdown can time out while a public data provider blocks.
+                # Do not forget the still-running thread: start() would
+                # otherwise launch a second scheduler into the same ledger.
+                log.warning("Paper worker is still shutting down; new worker start suppressed")
+            else:
+                self.thread = None
