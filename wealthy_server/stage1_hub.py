@@ -163,16 +163,37 @@ def asset_history(owner,portfolios,ledger,*,performance=None,now=None):
 
 def dashboard(owner,portfolios,ledger,prefs,*,market_provider=market_indices,
               report_provider=None,decision_provider=None):
-    # Separate failures by panel, never hide a market data problem behind a
-    # fabricated amount. Slow providers should be cached by the caller.
-    p=portfolio_report(owner,portfolios,ledger) if report_provider is None else report_provider()
-    history=asset_history(owner,portfolios,ledger,performance=p)
-    decision=(decision_provider() if decision_provider else
-              proposal(owner,portfolios,prefs,StrategyPolicy(portfolios)))
+    """Keep owner cash visible when market/news/recommendation services fail.
+
+    Do not swallow errors reading the actual account ledger or invent valuations.
+    """
     accounts=portfolios.list(owner)["accounts"]
-    return {"markets":market_provider(),"performance":p,"history":history,
+    errors=[]
+    try:
+        p=portfolio_report(owner,portfolios,ledger) if report_provider is None else report_provider()
+        history=asset_history(owner,portfolios,ledger,performance=p)
+    except (OSError,ValueError,KeyError,TypeError,ArithmeticError):
+        errors.append("valuation_unavailable")
+        p={"complete":False,"portfolio_value_krw":None,"contributions_krw":None,
+           "return_krw":None,"missing":[]}
+        history=[]
+    try:
+        decision=(decision_provider() if decision_provider else
+                  proposal(owner,portfolios,prefs,StrategyPolicy(portfolios)))
+    except (OSError,ValueError,KeyError,TypeError,ArithmeticError):
+        errors.append("decision_unavailable")
+        decision={"recommendations":[],"coverage_limitations":["투자 판단에 필요한 자료를 확인하지 못했습니다."]}
+    try:
+        markets=market_provider()
+    except (OSError,ValueError,KeyError,TypeError,ArithmeticError):
+        errors.append("markets_unavailable")
+        markets=[{"name":name,"status":"unavailable","value":None,
+                  "change_pct":None,"as_of":None,"source":"source unavailable"}
+                 for name,_ in INDEXES]
+    return {"markets":markets,"performance":p,"history":history,
             "accounts":[{"id":a["id"],"name":a["name"],"krw_cash":a["krw_cash"],
                "usd_cash":a["usd_cash"],"holdings":len(a["holdings"])} for a in accounts],
             "recommendations":decision["recommendations"][:8],
             "decision_constraints":decision["coverage_limitations"],
-            "notice":"시장 데이터는 지연 종가입니다. 일별 자산 차트는 실제 기록한 날짜부터 누적되며 과거값을 생성하지 않습니다."}
+            "partial_errors":errors,
+            "notice":"검증된 자료만 표시합니다. 외부 시장자료 오류는 가상계좌 현금 조회를 차단하지 않습니다."}
