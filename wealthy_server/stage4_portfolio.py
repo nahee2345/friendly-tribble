@@ -287,6 +287,22 @@ class PortfolioEngine:
             "held_krw":str(sleeve_held[(m,kind)].quantize(Decimal(".01"))),
             "drift_krw":str(gaps[(m,kind)].quantize(Decimal(".01")))}
             for m in ("US","KR") for kind in ("ETF","STOCK")}
+        # Stage6 historical risk is a BUY veto/watch only. It never silently
+        # overrides the existing exit/approval policy or creates trades.
+        from .stage6_risk import review_candidate
+        risk_cache={}
+        for symbol in symbols:
+            risk_cache[symbol]=review_candidate(
+                observations.get(("HISTORY",symbol)),symbol,now)
+        for holding in held:
+            signal=risk_cache.get(holding["symbol"])
+            if signal and signal.get("risk") and signal["risk"]["status"] in ("elevated","critical"):
+                risk=signal["risk"]
+                watches.append({"account":holding["account"],"symbol":holding["symbol"],
+                    "kind":"QUANT_RISK","reason":
+                    f"과거 63거래일 연환산 변동성 {risk['annualized_volatility_pct']}%, "+
+                    f"최대낙폭 {risk['max_drawdown_pct']}%: 추가 위험 점검(이 신호만으로 자동매도하지 않음)",
+                    "source":signal["source"],"sell_automatically":False})
         # Existing holdings get explicit exit and overweight review, based on
         # average acquisition cost and correctly normalized portfolio exposure.
         for a in accounts:
@@ -355,6 +371,9 @@ class PortfolioEngine:
                 symbol=result["symbol"]
                 price=prices.get(symbol)
                 if price is None or not coherence.get(symbol,False):continue
+                risk_signal=risk_cache.get(symbol)
+                if not risk_signal or risk_signal["buy_guard"]["status"]!="permitted_for_stage4_checks":
+                    continue
                 if market=="US" and rate is None:continue
                 converted=price*(rate if market=="US" else Decimal(1))
                 if converted<=0:continue
@@ -372,9 +391,13 @@ class PortfolioEngine:
                     available=_decimal(account["krw_cash"])+(
                         _decimal(account["usd_cash"])*rate if market=="US" and rate else 0)
                     available-=pending_by_account.get(account_id,Decimal(0))
+                    # Elevated historical risk halves the usual order
+                    # budget, never raises an allocation or risk limit.
+                    risk_factor=(Decimal("0.5") if
+                        risk_signal["risk"]["status"]=="elevated" else Decimal(1))
                     budget=min(max(Decimal(0),deficit),max(Decimal(0),headroom),
                                max(Decimal(0),available*(1-reserve)),
-                               remaining,MAX_ORDER_KRW)
+                               remaining,MAX_ORDER_KRW*risk_factor)
                     quantity=int((budget/converted).to_integral_value(rounding=ROUND_DOWN))
                     if market=="US":quantity=min(quantity,1) # atomic verified-FX buy path
                     quantity=min(quantity,5)
@@ -388,6 +411,9 @@ class PortfolioEngine:
                         "strategy_score":result["score"],
                         "coverage_pct":result["coverage_pct"],
                         "source_hash":observations[("PRICE",symbol)]["sha256"],
+                        "risk_history_hash":risk_signal["source"]["sha256"],
+                        "risk_level":risk_signal["risk"]["status"],
+                        "risk_volatility_pct":risk_signal["risk"]["annualized_volatility_pct"],
                         "reason":f"목표 대비 {market}/{kind} 부족 {str(deficit.quantize(Decimal('.01')))}원; "
                                  f"8전략 점수 {result['score']}점·검증자료 {result['coverage_pct']}%"})
                     pending_by_account[account_id]=pending_by_account.get(account_id,Decimal(0))+cost
@@ -416,6 +442,8 @@ class PortfolioEngine:
                          "매수 체결 직전 새 공식/공개 지연종가·환율을 재검증합니다.",
                          "30만원 이상 자동 체결 금지, 승인 생략 금지.",
                          "하루 신규매수 한도 평가자산 5%, 종목별 ETF 20%/개별주 10% 이내.",
+                         "최근 63거래일 위험자료 부족·극단적 변동/낙폭이면 자동매수 보류.",
+                         "상승/하락 추세 재현은 매수 승인이나 미래 수익률 예측이 아님.",
                          "전략 점수는 미래수익 예측 아님. 목표비중과 재고 부족의 보수적 검토 신호.",
                          "과도 비중만으로 자동매도하지 않으며 매도는 기준손익 조건일 때만 검토."]}
         # Hash only deterministic policy/valuation/intent; timestamp changes
@@ -491,6 +519,20 @@ class PortfolioEngine:
                         raise ValueError("FX_MOVED_MORE_THAN_3_PERCENT")
                     if (now.astimezone(KST).date()-date.fromisoformat(forex["as_of"])).days not in range(0,6):
                         raise ValueError("STALE_EXECUTION_FX")
+                # Stage6 cannot turn its research history into an execution
+                # price. Both cached source hashes must remain unchanged
+                # between plan and independent execution quote.
+                if choice["side"]=="BUY":
+                    references=self.market_store.latest_many([
+                        ("PRICE",choice["symbol"]),("HISTORY",choice["symbol"])],now=now)
+                    fresh_price=references.get(("PRICE",choice["symbol"]),{})
+                    fresh_history=references.get(("HISTORY",choice["symbol"]),{})
+                    if (fresh_price.get("sha256")!=choice["source_hash"] or
+                        fresh_history.get("sha256")!=choice.get("risk_history_hash")):
+                        raise ValueError("RISK_OR_PRICE_REFERENCE_CHANGED")
+                    if review_candidate(fresh_history,choice["symbol"],now)[
+                            "buy_guard"]["status"]!="permitted_for_stage4_checks":
+                        raise ValueError("STAGE6_BUY_RISK_REJECTED")
                 actual=live*_decimal(choice["quantity"])*(rate if rate else Decimal(1))
                 if actual>=Decimal("300000") or actual>MAX_ORDER_KRW:
                     raise ValueError("APPROVAL_REQUIRED_300K_OR_ORDER_LIMIT")
