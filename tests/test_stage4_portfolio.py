@@ -239,7 +239,7 @@ def test_allocations_obey_total_daily_cap_across_multiple_sleeves(tmp_path):
     assert len(plan["proposed_orders"])==2
     set_paused("owner",p,False,"test")
     result=engine.run("owner",now=NOW)
-    assert len(result["executed"])==2
+    assert len(result["executed"])==2, result
     assert sum(float(x["notional_krw"]) for x in recorded_claims("owner",p)["items"])<=200000
     assert not engine.run("owner",now=NOW)["executed"]
 
