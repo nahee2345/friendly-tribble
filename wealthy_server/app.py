@@ -852,6 +852,28 @@ def create_app(
             except ValueError:
                 raise _error(400, "INVALID_PORTFOLIO", "가상계좌 이름 또는 유형을 확인해 주세요.") from None
 
+        class ManualAssetBody(BaseModel):
+            account: str
+            symbol: str
+            currency: str
+            quantity: str
+            side: str
+
+        @app.get("/api/v1/stage1/manual-assets")
+        def stage10_manual_assets(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
+            from .stage10_manual_assets import list_assets
+            return list_assets(portfolio_store,actor.owner_id)
+
+        @app.post("/api/v1/stage1/manual-assets")
+        def stage10_adjust_manual_asset(body: ManualAssetBody,
+                                        actor: Actor = Depends(mutation_actor)) -> dict[str, Any]:
+            from .stage10_manual_assets import adjust
+            try:
+                return adjust(portfolio_store,actor.owner_id,body.account,
+                              body.symbol,body.currency,body.quantity,body.side)
+            except ValueError:
+                raise _error(400,"INVALID_MANUAL_ASSET","계좌·종목·보유수량을 확인해 주세요.") from None
+
         @app.get("/api/v1/stage1/portfolios/{portfolio_id}/orders")
         def stage1_orders(portfolio_id: str, actor: Actor = Depends(current_actor)) -> dict[str, Any]:
             try:
