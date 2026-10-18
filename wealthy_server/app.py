@@ -791,6 +791,19 @@ def create_app(
             except ValueError:
                 raise _error(404, "PORTFOLIO_NOT_FOUND", "가상계좌를 찾을 수 없습니다.") from None
 
+        def require_release_ledger_integrity(owner_id: str) -> None:
+            """Block the legacy user-facing money mutation paths too.
+
+            The Stage4 autonomous path already uses this audit before fills;
+            older UI routes must never bypass it after a crash or corruption.
+            """
+            from .stage7_release import audit_paper_ledger
+            initialize_paper_accounts(owner_id,stage1,portfolio_store)
+            result=audit_paper_ledger(owner_id,portfolio_store)
+            if result["blocking_count"]:
+                raise _error(409,"PAPER_LEDGER_INTEGRITY_BLOCKED",
+                             "원장 무결성 문제가 확인되어 가상 자금 이동·주문을 중지했습니다.")
+
         class TransferBody(BaseModel):
             source: str
             destination: str
@@ -799,6 +812,7 @@ def create_app(
 
         @app.post("/api/v1/stage1/transfer")
         def stage1_transfer(body: TransferBody, actor: Actor = Depends(mutation_actor)) -> dict[str, Any]:
+            require_release_ledger_integrity(actor.owner_id)
             try:
                 return portfolio_store.transfer(actor.owner_id, body.source, body.destination, body.amount_krw, body.request_id)
             except ValueError:
@@ -818,6 +832,7 @@ def create_app(
 
         @app.post("/api/v1/stage1/order")
         def stage1_order(body: VirtualOrderBody, actor: Actor = Depends(mutation_actor)) -> dict[str, Any]:
+            require_release_ledger_integrity(actor.owner_id)
             from .stage1_quotes import verified_quote
             from .stage1_controls import status, request_approval, list_approvals
             if status(actor.owner_id, portfolio_store)["paused"]:
@@ -935,6 +950,7 @@ def create_app(
 
         @app.post("/api/v1/stage1/exchange")
         def stage1_exchange(body: VirtualFXBody, actor: Actor = Depends(mutation_actor)) -> dict[str, Any]:
+            require_release_ledger_integrity(actor.owner_id)
             try:
                 return stage1.exchange(actor.owner_id, body.krw, body.usd_krw, body.request_id)
             except ValueError:
