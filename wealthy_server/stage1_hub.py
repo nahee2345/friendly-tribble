@@ -76,7 +76,16 @@ def news_30d(*,now=None,fetcher=None,limit=30):
     for item in summaries:
         dedup[(item["market"],item["title"].casefold())]=item
     items=sorted(dedup.values(),key=lambda x:x["published_utc"],reverse=True)[:limit]
-    return {"items":items,"status":"partial" if missing else "ok","unavailable":missing,
+    if items:
+        from .stage1_research import translate_headline_redundant
+        english=[i for i in items[:12] if i["market"]=="US"]
+        if english:
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                translations=list(pool.map(translate_headline_redundant,[i["title"] for i in english]))
+            for item,translated in zip(english,translations):
+                item["title_ko"]=translated
+                item["translation_status"]="translated_external" if translated else "translation_unavailable"
+    return {"items":items,"status":"partial" if missing and items else "unavailable" if not items else "ok","unavailable":missing,
             "coverage":"공개 Google News RSS 검색의 최근 30일 결과 일부. 모든 기사·원문 분석 보장 안 함"}
 
 def _fetch_rss(query,market,language):
@@ -94,7 +103,10 @@ def _fetch_rss(query,market,language):
         link=(row.findtext("link") or "").strip()
         pub=(row.findtext("pubDate") or "").strip()
         if title and link.startswith("https://news.google.com/") and pub:
-            items.append({"title":title,"url":link,"published":pub,"source":"Google News RSS"})
+            publisher=(row.findtext("source") or "").strip()[:100] or "언론사 미확인"
+            items.append({"title":title,"url":link,"published":pub,"source":"Google News RSS",
+                          "publisher":publisher,"editorial_lean":"평가 자료 없음",
+                          "editorial_basis":"언론사 정치 성향은 기사 제목으로 판단하지 않습니다."})
     return items
 
 def _classify(item,holdings):
