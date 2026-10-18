@@ -44,19 +44,19 @@ def test_4m_sandbox_actual_stage4_buy_and_idempotency():
     assert sample["repeat_run_new_orders"]==0
     assert Decimal(sample["estimated_spend_krw"])<=Decimal(200000)
     assert Decimal(sample["estimated_spend_krw"])>0
-    assert {x["symbol"] for x in sample["orders"]}=={"VOO","069500"}
+    assert {x["symbol"] for x in sample["orders"]}=={"SPYM","069500"}
     executed={x["symbol"]:x for x in sample["orders"]}
-    assert executed["VOO"]["account"]=="default" and executed["VOO"]["quantity"]==1
-    assert executed["069500"]["account"]=="isa-base" and executed["069500"]["quantity"]==4
+    assert executed["SPYM"]["account"]=="default" and executed["VOO"]["quantity"]==1
+    assert executed["069500"]["account"]=="isa-base" and executed["069500"]["quantity"]==3
     assert Decimal(executed["VOO"]["krw_notional"])==112000
-    assert Decimal(executed["069500"]["krw_notional"])==80000
-    assert Decimal(sample["estimated_spend_krw"])==192000
+    assert Decimal(executed["069500"]["krw_notional"])==60000
+    assert Decimal(sample["estimated_spend_krw"])==186000
     assert all(x["side"]=="BUY" for x in sample["orders"])
     assert all(x["strategy_score"]>=70 and x["coverage_pct"]==100
                for x in sample["orders"])
     positions={x["symbol"]:x["quantity"] for acc in sample["ending_accounts"]
                for x in acc["positions"]}
-    assert set(positions)=={"VOO","069500"}
+    assert set(positions)=={"SPYM","069500"}
     assert all(v>0 for v in positions.values())
 
 
@@ -66,7 +66,8 @@ def test_fixture_pricing_never_claimed_as_verified_live_close():
     assert result["active_user_ledger_touched"] is False
     assert result["simulated_orders_exported"] is False
     assert result["broker_used"] is False and result["ai_used"] is False
-    assert result["price_fixture"]["VOO"]["USD"]=="80"
+    assert result["price_fixture"]["VOO"]["USD"]=="600"
+    assert result["price_fixture"]["SPYM"]["USD"]=="90"
     assert result["price_fixture"]["069500"]["KRW"]=="20000"
     assert result["price_fixture"]["USD/KRW"]=="1400"
     assert result["weekday_replay"]["status"]=="completed"
@@ -98,7 +99,7 @@ def test_production_owner_hold_and_defaults_remain_frozen():
     assert DEMO_OWNER!="owner" and DEMO_OWNER!="alice"
     assert DEFAULT_WEIGHTS["index"]==30
     assert sum(DEFAULT_WEIGHTS.values())==100
-    assert len(SYMBOLS)==2
+    assert len(SYMBOLS)==3
 
 
 def test_no_external_request_even_if_internet_blocked(monkeypatch):
