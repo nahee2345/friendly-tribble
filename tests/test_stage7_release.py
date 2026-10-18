@@ -213,6 +213,9 @@ def test_backup_can_be_verified_without_restore_source_overwrite(tmp_path):
     assert result["status"]=="structurally_verified"
     assert result["sha256_computed_now"]==first["sha256"]
     assert result["trusted_manifest_hash_verified"] is False
+    assert result["temporary_restore_drill_ok"] is True
+    assert result["temporary_restore_issue"] is None
+    assert not list(backups.glob(".stage7-restore-*"))
     assert result["restore_performed"] is False
     assert result["source_overwritten"] is False
     assert result["owner_rows"]["stage1_events"]>=1
@@ -228,6 +231,8 @@ def test_corrupted_backup_fails_without_touching_active_paper_db(tmp_path):
         f.seek(100);f.write(b"not a valid SQLite copy")
     verified=verify_backup_copy(p,saved["filename"],"alice",directory=backup_dir)
     assert verified["status"]=="unusable"
+    assert verified["temporary_restore_drill_ok"] is False
+    assert not list(backup_dir.glob(".stage7-restore-*"))
     assert verified["restore_performed"] is False
     assert audit(p)["status"]=="healthy"
 
