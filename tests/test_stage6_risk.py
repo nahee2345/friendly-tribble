@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import math
+from decimal import Decimal
 from datetime import date,datetime,timedelta,timezone
 
 import pytest
