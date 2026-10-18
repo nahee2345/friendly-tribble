@@ -44,13 +44,13 @@ def test_4m_sandbox_actual_stage4_buy_and_idempotency():
     assert sample["repeat_run_new_orders"]==0
     assert Decimal(sample["estimated_spend_krw"])<=Decimal(200000)
     assert Decimal(sample["estimated_spend_krw"])>0
-    assert {x["symbol"] for x in sample["orders"]}=={"VOO","360750"}
+    assert {x["symbol"] for x in sample["orders"]}=={"VOO","069500"}
     assert all(x["side"]=="BUY" for x in sample["orders"])
     assert all(x["strategy_score"]>=70 and x["coverage_pct"]==100
                for x in sample["orders"])
     positions={x["symbol"]:x["quantity"] for acc in sample["ending_accounts"]
                for x in acc["positions"]}
-    assert set(positions)=={"VOO","360750"}
+    assert set(positions)=={"VOO","069500"}
     assert all(v>0 for v in positions.values())
 
 
@@ -61,7 +61,7 @@ def test_fixture_pricing_never_claimed_as_verified_live_close():
     assert result["simulated_orders_exported"] is False
     assert result["broker_used"] is False and result["ai_used"] is False
     assert result["price_fixture"]["VOO"]["USD"]=="80"
-    assert result["price_fixture"]["360750"]["KRW"]=="20000"
+    assert result["price_fixture"]["069500"]["KRW"]=="20000"
     assert result["price_fixture"]["USD/KRW"]=="1400"
     assert result["weekday_replay"]["status"]=="completed"
     assert "다음 거래일" in " ".join(result["important"])
