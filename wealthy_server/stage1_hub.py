@@ -96,7 +96,7 @@ def news_30d(*,now=None,fetcher=None,limit=30):
     items=sorted(dedup.values(),key=lambda x:x["published_utc"],reverse=True)[:limit]
     if items:
         from .stage1_research import translate_headline_redundant
-        english=[i for i in items if i["market"]=="US"] if live_fetcher else []
+        english=[i for i in items if i["market"]=="US"][:12] if live_fetcher else []
         if english:
             with ThreadPoolExecutor(max_workers=4) as pool:
                 translations=list(pool.map(translate_headline_redundant,[i["title"] for i in english]))
