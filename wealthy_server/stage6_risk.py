@@ -385,7 +385,9 @@ class RiskEngine:
                 risks.append({"symbol":item["left"]+" / "+item["right"],
                     "level":"correlation",
                     "reason":f"동일 통화 가격수익률 상관 {item['correlation']}; 포트폴리오 분산 효과 재검토",
-                    "source":refs.get(item["left"]),"no_automatic_sell":True})
+                    "source":refs.get(item["left"]),
+                    "other_source":refs.get(item["right"]),
+                    "no_automatic_sell":True})
         return {"engine_version":VERSION,"status":"complete" if not unknown else "incomplete",
             "as_of_utc":now.isoformat(),"holdings":held,
             "invested_exposure_krw":str(sum_krw) if not unknown else None,
@@ -428,12 +430,17 @@ class RiskEngine:
             for item in report["alerts"][:12]:
                 src=item.get("source")
                 if not src:continue
-                identity=(item["symbol"]+"|"+item["level"]+"|"+src["sha256"])
+                companion=item.get("other_source")
+                identity=(item["symbol"]+"|"+item["level"]+"|"+src["sha256"]+
+                          ("|"+companion["sha256"] if companion else ""))
                 key="risk:quant:"+hashlib.sha256(identity.encode()).hexdigest()[:32]
                 label="보유종목 정량 위험 검토: "+item["symbol"]
-                details=(item["reason"]+" / 근거 "+src["url"]+
+                details=(item["reason"]+" / 근거1 "+src["url"]+
                          " / 기준일 "+src["as_of"]+
                          " / SHA256 "+src["sha256"]+
+                         (" / 근거2 "+companion["url"]+
+                          " / 기준일 "+companion["as_of"]+
+                          " / SHA256 "+companion["sha256"] if companion else "")+
                          " / 단순 과거 위험 신호이며 매도 확정 아님")[:1800]
                 db.execute("""INSERT OR IGNORE INTO stage1_inbox
                     (owner,event_id,title,detail,created_at,read_at)
