@@ -262,7 +262,12 @@ def test_claimed_after_crash_is_not_replayed(tmp_path):
     set_paused("owner",p,False,"test")
     result=engine.run("owner",now=NOW)
     assert result["executed"]==[]
-    assert result["skipped"][0]["status"]=="already_claimed"
+    # Stage7 fail-closed release audit supersedes Stage4 per-request skip:
+    # an unresolved crash claim freezes ALL new simulated fills until
+    # independent reconciliation, never silently marks the claim rejected.
+    assert result["status"]=="integrity_blocked"
+    assert any(x["code"]=="INTERRUPTED_EXECUTION_CLAIM" for x in result["issues"])
+    assert result["skipped"]==[]
     assert p.orders("owner","default")["orders"]==[]
 
 
