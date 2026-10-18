@@ -584,7 +584,13 @@ def create_app(
                 status="sandbox_failed"
                 sandbox={"status":"unavailable","error_class":type(error).__name__,
                          "orders":[],"active_user_ledger_touched":False}
+            from zoneinfo import ZoneInfo
+            kst_day=datetime.now(ZoneInfo("Asia/Seoul")).date()
             return {"status":status,"mode":"SANDBOX_FIXTURE_SEPARATE",
+                "local_market":{"today_kst":kst_day.isoformat(),
+                    "weekend":kst_day.weekday()>=5,
+                    "exchange_holiday_calendar_verified":False,
+                    "notice":"주말 여부만 자동 판정합니다. 한국·미국 거래소 휴장일과 미국 거래시간은 별도 검증이 필요합니다."},
                 "actual_owner":{"initial_4000000_recorded":funded,
                     "cash_krw":str(cash),"cash_usd":str(usd),
                     "holdings_count":holdings,
