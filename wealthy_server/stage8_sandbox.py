@@ -29,8 +29,10 @@ from .stage7_release import audit_paper_ledger
 UTC=timezone.utc
 KST=ZoneInfo("Asia/Seoul")
 DEMO_OWNER="sandbox-stage8-only"
-SYMBOLS={"VOO":{"hypothetical_close":"80","market":"US","kind":"ETF",
+SYMBOLS={"VOO":{"hypothetical_close":"600","market":"US","kind":"ETF",
                  "name":"Vanguard S&P 500 ETF"},
+         "SPYM":{"hypothetical_close":"90","market":"US","kind":"ETF",
+                 "name":"State Street SPDR Portfolio S&P 500 ETF"},
          "069500":{"hypothetical_close":"20000","market":"KR","kind":"ETF",
                   "name":"KODEX 200"}}
 DEMO_FX="1400"
@@ -201,11 +203,14 @@ def _uncommitted_scenario(run_utc,close):
             "ai_used":False,"broker_used":False,
             "active_user_ledger_touched":False,
             "simulated_orders_exported":False,
-            "price_fixture":{"VOO":{"USD":"80"},
+            "price_fixture":{"VOO":{"USD":"600"},
+                             "SPYM":{"USD":"90"},
                              "069500":{"KRW":"20000"},"USD/KRW":"1400"},
             "important":["이 결과는 인공 과거가격과 임의 환율을 넣어 거래 엔진 안전성을 시험한 것입니다.",
                          "실제 지연 시세가 확보되기 전에는 동일 종목에 대한 주문을 보장하거나 권유할 수 없습니다.",
                          "주말에는 0건이며, 다음 거래일에도 현금·시세·리스크·사용자 설정에 따라 0건일 수 있습니다.",
+                         "저가 단위 S&P 500 ETF SPYM도 원본 지연 종가와 환율 확인이 없으면 실제 가상매수하지 않습니다.",
+                         "VOO 가정 단가 600달러는 당일 20만원 한도를 초과하므로 매수 후보에서 제외됩니다.",
                          "당일 매수 최대 5% 정책을 유지하므로 400만 원을 하루에 전액 투자하지 않습니다.",
                          "기존 사용자의 투자 기록을 초기화하거나 체결을 만들지 않습니다."]}
 
