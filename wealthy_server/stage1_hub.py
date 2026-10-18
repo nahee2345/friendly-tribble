@@ -117,6 +117,10 @@ def _fetch_rss(query,market,language):
     # Independent public publisher feed if Google News is unavailable for US.
     if market=="US":
         candidates.append("https://feeds.bbci.co.uk/news/business/rss.xml")
+    else:
+        candidates.extend(("https://www.mk.co.kr/rss/50200011/",
+                           "https://www.hankyung.com/feed/finance",
+                           "https://www.yna.co.kr/rss/economy.xml"))
     root=None
     for url in candidates:
         try:
@@ -137,9 +141,15 @@ def _fetch_rss(query,market,language):
         title=(row.findtext("title") or "").strip()[:250]
         link=(row.findtext("link") or "").strip()
         pub=(row.findtext("pubDate") or "").strip()
-        allowed_prefixes=("https://news.google.com/","https://www.bbc.com/","https://www.bbc.co.uk/")
+        allowed_prefixes=("https://news.google.com/","https://www.bbc.com/","https://www.bbc.co.uk/",
+                          "https://www.mk.co.kr/","https://www.hankyung.com/","https://www.yna.co.kr/")
         if title and any(link.startswith(prefix) for prefix in allowed_prefixes) and pub:
-            publisher=(row.findtext("source") or "").strip()[:100] or ("BBC News" if "bbc." in link else "언론사 미확인")
+            publisher=(row.findtext("source") or "").strip()[:100]
+            if not publisher:
+                publisher=("BBC News" if "bbc." in link else
+                           "매일경제" if "mk.co.kr" in link else
+                           "한국경제" if "hankyung.com" in link else
+                           "연합뉴스" if "yna.co.kr" in link else "언론사 미확인")
             editorial,source_url=_editorial_context(publisher) if market=="KR" else ("해당 없음",None)
             items.append({"title":title,"url":link,"published":pub,"source":"Google News RSS",
                           "publisher":publisher,"editorial_lean":editorial,
