@@ -478,6 +478,16 @@ class PortfolioEngine:
         if pause_status(owner,self.portfolios)["paused"]:
             return {"status":"paused","reason":"가상매매 중지 상태",
                     "executed":[],"skipped":[],"simulated_only":True}
+        # Stage7: a read-only cross-table preflight precedes each unattended
+        # paper fill. A corrupt order, interrupted claim or invalid historic
+        # cash cannot be paper-traded through. No automatic data rewriting.
+        from .stage7_release import audit_paper_ledger
+        audit=audit_paper_ledger(owner,self.portfolios,now=now)
+        if audit["blocking_count"]:
+            return {"status":"integrity_blocked",
+                    "reason":"가상투자 원장 무결성 감사 실패; 상세 감사에서 원인을 확인하세요.",
+                    "issues":audit["issues"],"executed":[],"skipped":[],
+                    "simulated_only":True}
         plan=self.preview(owner,now=now)
         if plan["status"]!="ready":
             return {"status":"blocked","reason":plan["reason"],
