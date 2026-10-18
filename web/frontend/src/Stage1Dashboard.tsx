@@ -207,24 +207,34 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
       <span title="보유종목 관련 하방 위험 의심 알림">위험 알림 {riskUnread}</span>
     </header>
     {error&&<div className="wh-error">{error}</div>}
+    {tab==='home'&&<div className="wh-stage8-strip">
+      <span><b>실제 가상계좌</b> {stage8?.actual_owner.initial_4000000_recorded?
+        '초기 400만원 입금 확인':'초기 입금 확인 중'}</span>
+      <span>{stage8?.local_market.weekend?'주말 · 시장 휴장 (자동주문 차단)':
+        '거래일 여부: 주말 외 공식 휴장일 별도 확인'}</span>
+      <button onClick={()=>setShowStage8(true)} aria-label="400만원 검증용 격리 모의투자 결과 보기">
+        400만원 가정 모의투자 {sandbox?sandbox.weekday_replay.orders.length+'건 검증':'결과 확인'} · 상세 ›
+      </button>
+    </div>}
     {tab==='home'?<main className="wh-grid">
       <section className="wh-card wh-markets"><div className="wh-head"><b>시장 현황</b><small>지연 일간 종가 · 기준일 표시</small></div><div className="wh-indexgrid">
-        {(hub?.markets??[{name:'KOSPI'},{name:'KOSDAQ'},{name:'S&P 500'},{name:'NASDAQ'}]).map(m=><div className="wh-index" key={m.name}><small>{m.name}</small><strong>{'value'in m?fmt(m.value,2):'조회 중'}</strong><span>{'change_pct'in m&&m.change_pct!==null&&m.change_pct!==undefined?(m.change_pct>0?'+':'')+m.change_pct+'%':'등락 미확인'}</span><small>{'as_of'in m?m.as_of:'–'}</small></div>)}
+        {(hub?.markets??[{name:'KOSPI'},{name:'KOSDAQ'},{name:'S&P 500'},{name:'NASDAQ'}]).map(m=><div className="wh-index" key={m.name}><small>{m.name}</small><strong>{'value'in m&&m.value!==null&&m.value!==undefined?fmt(m.value,2):'미확인'}</strong><span>{'change_pct'in m&&m.change_pct!==null&&m.change_pct!==undefined?(m.change_pct>0?'+':'')+m.change_pct+'%':'등락 미확인'}</span><small>{'as_of'in m&&m.as_of?m.as_of:'원본 시세 대기'}</small></div>)}
         </div></section>
       <section className="wh-card wh-assets"><div className="wh-head"><b>내 총자산 흐름</b>
         <button className="wh-plan-trigger" onClick={()=>setShowAccounting(true)}>
           손익·환율 근거 ›
         </button></div>
         <div className="wh-total">{accounting?.valuation_complete?'₩'+fmt(accounting.market_valuation_krw):
-          hub?.performance.complete?'₩'+fmt(hub.performance.portfolio_value_krw):'시세 확인 필요'}</div>
+          hub?.performance.complete?'₩'+fmt(hub.performance.portfolio_value_krw):
+          actualOnlyCash!==null?'₩'+fmt(actualOnlyCash)+' (현금만)':'시세 확인 필요'}</div>
         <div className="wh-kpis"><span>누적 입금 ₩{fmt(accounting?.contributions_krw??hub?.performance.contributions_krw)}</span>
           <span>총손익(세전) {accounting?.valuation_complete?'₩'+fmt(accounting.gross_change_after_contributions_krw):
             hub?.performance.complete?'₩'+fmt(hub.performance.return_krw):'미확정'}</span>
           <span>XIRR {accounting?.xirr.status==='ok'?fmt(accounting.xirr.pct,2)+'%':'미확정'}</span></div>
         <div className="wh-chart"><AssetGraph data={accounting?.nav_history??[]}/></div><div className="wh-legend"><span>━ 평가자산</span><span>┄ 누적 입금원금</span></div></section>
       <section className="wh-card wh-accounts"><div className="wh-head"><b>가상계좌</b><small>미국 · 한국 · ISA</small></div>
-        {(hub?.accounts??[]).map(a=><div className="wh-account" key={a.id}><b>{a.id==='default'?'미국 일반':a.id==='kr-base'?'한국 일반':a.id==='isa-base'?'ISA':a.name}</b><span>₩{fmt(a.krw_cash)} · ${fmt(a.usd_cash,2)}</span><small>보유 {a.holdings}종</small></div>)}
-        {!hub&&<p>자산 원장 확인 중</p>}</section>
+        {(hub?.accounts??actualAccounts).map(a=><div className="wh-account" key={a.id}><b>{a.id==='default'?'미국 일반':a.id==='kr-base'?'한국 일반':a.id==='isa-base'?'ISA':a.name}</b><span>₩{fmt(a.krw_cash)} · ${fmt(a.usd_cash,2)}</span><small>보유 {a.holdings}종</small></div>)}
+        {!hub&&actualAccounts.length===0&&<p>실제 가상계좌 데이터 확인 중</p>}</section>
       <section className="wh-card wh-news"><div className="wh-head"><b>최근 30일 뉴스·보유종목 영향</b><small>{news?.summary.checked??0}건 검토 · 관련 {news?.summary.related??0}건</small></div>
         <div className="wh-feed">{(news?.news??[]).slice(0,5).map((n,i)=><div className="wh-newsrow" key={i}><span className={n.impact==='하방 위험 의심'?'wh-danger':''}>{n.impact}</span><a href={n.url} target="_blank" rel="noreferrer">{n.title}</a><small>{n.symbols.join(', ')||n.market}</small></div>)}
           {!news?.news.length&&<p>최근 30일 기사를 아직 확인하지 못했습니다.</p>}</div>
