@@ -266,26 +266,39 @@ def audit_paper_ledger(owner,portfolios,*,now=None):
             # account composition legitimately changes after old snapshots.
             if "stage5_nav_snapshots" in tables:
                 from .stage5_accounting import _snapshot_digest
-                nav_rows=db.execute("""SELECT as_of_day,observed_utc,nav_krw,
-                    sources_sha256,ledger_sha256,snapshot_sha256
-                    FROM stage5_nav_snapshots WHERE owner=? ORDER BY as_of_day DESC
-                    LIMIT 181""",(owner,)).fetchall()
-                counts["nav_snapshots"]=len(nav_rows)
-                for day,observed,nav,source_hash,ledger_hash,digest in nav_rows:
-                    if digest is None or ledger_hash is None:
-                        issue("UNSIGNED_LEGACY_NAV",
-                              "과거 NAV 서명 미확인 (수익률 산정 보류)",blocking=False)
-                        break
-                    try:
-                        _timestamp(observed,now)
-                        _dec(nav,negative=False)
-                        if len(source_hash)!=64 or len(ledger_hash)!=64 or len(digest)!=64:
-                            raise ValueError("wrong SHA length")
-                        if _snapshot_digest(owner,day,observed,nav,source_hash,ledger_hash)!=digest:
-                            raise ValueError("NAV value/hash mismatch")
-                    except (TypeError,ValueError):
-                        issue("NAV_SNAPSHOT_MISMATCH","일별 가상자산 기록 SHA·원장 시각 오류")
-                        break
+                nav_columns={r[1] for r in db.execute(
+                    "PRAGMA table_info(stage5_nav_snapshots)")}
+                required_nav={"as_of_day","observed_utc","nav_krw",
+                              "sources_sha256","ledger_sha256","snapshot_sha256"}
+                if not required_nav<=nav_columns:
+                    # Stage5 introduced source-linked digests after an older
+                    # 5-column NAV prototype. Report UNSIGNED, never write
+                    # ALTER TABLE from a read-only release audit.
+                    issue("UNSIGNED_LEGACY_NAV",
+                          "이전 NAV 원장에는 SHA 서명 열이 없어 수익률은 미검증",
+                          blocking=False)
+                    counts["nav_snapshots"]="legacy_columns_missing"
+                else:
+                    nav_rows=db.execute("""SELECT as_of_day,observed_utc,nav_krw,
+                        sources_sha256,ledger_sha256,snapshot_sha256
+                        FROM stage5_nav_snapshots WHERE owner=? ORDER BY as_of_day DESC
+                        LIMIT 181""",(owner,)).fetchall()
+                    counts["nav_snapshots"]=len(nav_rows)
+                    for day,observed,nav,source_hash,ledger_hash,digest in nav_rows:
+                        if digest is None or ledger_hash is None:
+                            issue("UNSIGNED_LEGACY_NAV",
+                                  "과거 NAV 서명 미확인 (수익률 산정 보류)",blocking=False)
+                            break
+                        try:
+                            _timestamp(observed,now)
+                            _dec(nav,negative=False)
+                            if len(source_hash)!=64 or len(ledger_hash)!=64 or len(digest)!=64:
+                                raise ValueError("wrong SHA length")
+                            if _snapshot_digest(owner,day,observed,nav,source_hash,ledger_hash)!=digest:
+                                raise ValueError("NAV value/hash mismatch")
+                        except (TypeError,ValueError):
+                            issue("NAV_SNAPSHOT_MISMATCH","일별 가상자산 기록 SHA·원장 시각 오류")
+                            break
             if "stage1_allocations" in tables:
                 splits=db.execute("""SELECT event_key,us_pct,kr_pct,isa_pct
                     FROM stage1_allocations WHERE owner=? LIMIT ?""",
