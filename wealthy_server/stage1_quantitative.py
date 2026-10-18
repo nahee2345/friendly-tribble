@@ -31,6 +31,7 @@ LABELS=dict(STRATEGIES)
 # holdings, fund expenses, tracking error or issuer solvency.
 INDEX_PROXIES={
     "VOO":("미국 대형주 지수 추종 ETF로 분류된 고정 상품정보",82),
+    "SPYM":("State Street 발행 S&P 500 지수 추종 ETF, 정규 거래소 티커로 확인",82),
     "VTI":("미국 전체시장 지수 추종 ETF로 분류된 고정 상품정보",90),
     "QQQM":("NASDAQ 100 지수 추종 ETF; 성장주 집중",66),
     "VXUS":("미국 외 선진·신흥시장 지수 추종 ETF",87),
