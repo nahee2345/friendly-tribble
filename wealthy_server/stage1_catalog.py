@@ -22,7 +22,7 @@ US_URLS=(
 )
 KR_URL="https://kind.krx.co.kr/corpgeneral/corpList.do?method=download&searchType=13"
 SEEDS=(
- ("US","VOO","Vanguard S&P 500 ETF","ETF"),("US","VTI","Vanguard Total Stock Market ETF","ETF"),
+ ("US","VOO","Vanguard S&P 500 ETF","ETF"),("US","SPYM","State Street SPDR Portfolio S&P 500 ETF","ETF"),("US","VTI","Vanguard Total Stock Market ETF","ETF"),
  ("US","QQQM","Invesco NASDAQ 100 ETF","ETF"),("US","SCHD","Schwab US Dividend Equity ETF","ETF"),
  ("US","VXUS","Vanguard Total International ETF","ETF"),("US","AAPL","Apple Inc.","STOCK"),
  ("US","MSFT","Microsoft Corp.","STOCK"),("KR","005930","삼성전자","STOCK"),
