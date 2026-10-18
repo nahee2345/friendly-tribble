@@ -17,6 +17,10 @@ type SourceEvidence={kind:string;provider:string;source_url:string;as_of:string;
 type QuantAssessment={symbol:string;status:string;recommendation:string;score:number|null;partial_score:number|null;coverage_pct:number;strategies:Record<string,Factor>;strategies_scored:string[];positive_reasons:string[];risk_reasons:string[];unknown_reasons:string[];source_evidence:SourceEvidence[];no_orders:boolean;paper_order_eligible:boolean};
 type QuantBatch={status:string;items:QuantAssessment[];weights:Record<string,number>;evaluated:number;ready:number;scoring_basis:string};
 type PaperPlan={status:string;reason:string;for_date?:string;portfolio_value_krw:string|null;cash_krw_equivalent:string|null;reserve_percent?:string;daily_spend_cap_krw:string|null;allocation:Record<string,{target_pct:string;held_krw:string;drift_krw:string}>;proposed_orders:{request_id:string;account:string;symbol:string;side:string;quantity:number;notional_krw:string;strategy_score:number|null;coverage_pct:number;reason:string}[];review:{symbol:string;account:string;reason:string;approval_required?:boolean}[];data_errors:string[];trade_enabled:boolean;quant_ready:number;quant_evaluated:number;rules:string[]};
+type RiskMetric={status:string;annualized_volatility_pct:number;max_drawdown_pct:number;historical_5pct_daily_return_pct:number;historical_5pct_tail_avg_pct:number;observation_sessions:number};
+type RiskEvidence={provider:string;url:string;as_of:string;sha256:string;verified_utc:string};
+type Replay={status:string;reason?:string;period_start?:string;period_end?:string;strategy_return_pct?:number;buy_hold_return_pct?:number;strategy_max_drawdown_pct?:number;friction_each_switch_pct?:number;switches?:number;limitations?:string[]};
+type RiskReport={engine_version:string;status:string;as_of_utc:string;holdings:{account:string;symbol:string;quantity:number;currency:string;value_krw:string|null;risk:RiskMetric|null;source:RiskEvidence|null}[];currency_proxies:{currency:string;risk?:RiskMetric;status:string}[];combined_krw_historical_risk:{reason:string;status:string};concentration:{symbol:string;share_of_invested_assets_pct:number;alert:boolean}[];possible_etf_index_overlap:{symbols:string[];reason:string}[];stress:{estimated_loss_krw:string;exposure_krw:string}|null;alerts:{symbol:string;level:string;reason:string;source:RiskEvidence|null}[];valuation_missing:string[];candidate?:{symbol:string;risk:RiskMetric|null;guard:{status:string;reason:string};source:RiskEvidence|null;momentum_replay:Replay}|null};
 type Stage5Accounting={nav_history:History[];status:string;valuation_complete:boolean;market_valuation_krw:string|null;gross_change_after_contributions_krw:string|null;contributions_krw:string;gross_change_pct:string|null;reference_usd_krw:string|null;xirr:{status:string;pct:number|null;reason?:string};twr:{status:string;pct:number|null;reason?:string};native_gross_pnl:Record<string,{realized:string;unrealized:string}>;positions:{account:string;symbol:string;currency:string;unrealized_native:string;fx_effect_krw:string|null;market_price_effect_krw:string|null;fx_split_status:string;price_as_of:string;price_source_url:string}[];potential_dividends:{symbol:string;ex_date:string;potential_gross:string;currency:string;source_url:string}[];fee_analysis:{illustrative_trade_fees_krw:string|null;actual_fee_amount_complete:boolean};tax_illustrations:{status:string;domestic_isa?:{included_symbols:string[];taxable_gain_proxy_krw:string;general_scenario_tax_krw:string;isa_scenario_tax_krw:string;potential_isa_saving_krw:string}|null;warning?:string};missing:string[];warnings:string[]};
 
 
@@ -63,6 +67,9 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
   const [accounting,setAccounting]=useState<Stage5Accounting|null>(null);
   const [showAccounting,setShowAccounting]=useState(false);
   const [showPlan,setShowPlan]=useState(false);
+  const [riskReview,setRiskReview]=useState<RiskReport|null>(null);
+  const [showRiskReview,setShowRiskReview]=useState(false);
+  const [selectedSymbolRisk,setSelectedSymbolRisk]=useState<RiskReport|null>(null);
   const [selectedAssessment,setSelectedAssessment]=useState<QuantAssessment|null>(null);
   const [showReferences,setShowReferences]=useState(false);
   async function loadHome(){
@@ -70,12 +77,14 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
     const results=await Promise.allSettled([read<Hub>('/api/v1/stage1/hub'),read<NewsReport>('/api/v1/stage1/news-30d'),
       read<QuantBatch>('/api/v1/stage1/quantitative'),
       read<PaperPlan>('/api/v1/stage1/portfolio-plan'),
-      read<Stage5Accounting>('/api/v1/stage1/accounting')]);
+      read<Stage5Accounting>('/api/v1/stage1/accounting'),
+      read<RiskReport>('/api/v1/stage1/risk-review')]);
     if(results[0].status==='fulfilled')setHub(results[0].value);else setError('시장·자산 평가를 확인하지 못했습니다. 서버와 가격 공급원을 확인하세요.');
     if(results[1].status==='fulfilled')setNews(results[1].value);
     if(results[2].status==='fulfilled')setQuant(results[2].value);else setQuant(null);
     if(results[3].status==='fulfilled')setPlan(results[3].value);else setPlan(null);
     if(results[4].status==='fulfilled')setAccounting(results[4].value);else setAccounting(null);
+    if(results[5].status==='fulfilled')setRiskReview(results[5].value);else setRiskReview(null);
     const inbox=await read<{items:{event_id:string;read_at:string|null}[]}>('/api/v1/stage1/inbox').catch(()=>null);
     if(inbox)setRiskUnread(inbox.items.filter(x=>x.event_id.startsWith('risk:')&&!x.read_at).length);
     const reference=await read<ReferenceHealth>('/api/v1/stage1/reference/health').catch(()=>null);
@@ -138,16 +147,20 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
     {head:'최근 30일 뉴스·출처',body:<>{relevantNews.length?relevantNews.map((n,i)=><p key={i}><b>{n.impact}</b> · <a href={n.url} target="_blank" rel="noreferrer">{n.title}</a><small> {n.published_utc.slice(0,10)} · {n.confidence}</small></p>):<p>관련성이 검증된 제목 매칭 뉴스가 없습니다. 호재·악재가 없다는 의미는 아닙니다.</p>}<p>가격 출처: {detail.source??'미확인'}</p></>}
   ]:[];
   async function refreshCatalog(){setBusy(true);try{await write('/api/v1/stage1/securities/refresh',{});setCatalog(await read<Catalog>('/api/v1/stage1/securities?'+new URLSearchParams({q:query,market,kind,limit:'50'})));}catch{setError('공개 종목 목록을 갱신하지 못했습니다.');}finally{setBusy(false);}}
-  async function openSecurity(x:Security){setSelected(x);setSelectedQuote(null);setSelectedAssessment(null);
-    const [q,assessment]=await Promise.all([
+  async function openSecurity(x:Security){setSelected(x);setSelectedQuote(null);setSelectedAssessment(null);setSelectedSymbolRisk(null);
+    const [q,assessment,riskDetail]=await Promise.all([
       read<typeof selectedQuote>('/api/v1/stage1/quote/'+encodeURIComponent(x.symbol)).catch(()=>null),
-      read<QuantAssessment>('/api/v1/stage1/quantitative/'+encodeURIComponent(x.symbol)).catch(()=>null)
+      read<QuantAssessment>('/api/v1/stage1/quantitative/'+encodeURIComponent(x.symbol)).catch(()=>null),
+      read<RiskReport>('/api/v1/stage1/risk-review/'+encodeURIComponent(x.symbol)).catch(()=>null)
     ]);
-    setSelectedQuote(q);setSelectedAssessment(assessment);
+    setSelectedQuote(q);setSelectedAssessment(assessment);setSelectedSymbolRisk(riskDetail);
   }
-  async function openRecommendation(x:Recommendation){setDetail(x);setSlide(0);setTrend(null);
-    const result=await read<PriceTrend>('/api/v1/stage1/last-30d/'+encodeURIComponent(x.symbol)).catch(()=>null);
-    setTrend(current=>current===null?result:current);
+  async function openRecommendation(x:Recommendation){setDetail(x);setSlide(0);setTrend(null);setSelectedSymbolRisk(null);
+    const [trendResult,riskResult]=await Promise.all([
+      read<PriceTrend>('/api/v1/stage1/last-30d/'+encodeURIComponent(x.symbol)).catch(()=>null),
+      read<RiskReport>('/api/v1/stage1/risk-review/'+encodeURIComponent(x.symbol)).catch(()=>null)
+    ]);
+    setTrend(trendResult);setSelectedSymbolRisk(riskResult);
   }
   return <div className="wh-wrap">
     <header className="wh-header"><div><b>WEALTHY</b><small>미국·한국 자동 모의투자 · 실시간 호가 아님</small></div>
