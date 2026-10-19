@@ -8,8 +8,8 @@ type Recommendation={symbol:string;name:string;region:string;kind:string;account
 type History={date:string;value_krw:string|null;contributed_krw:number;complete:boolean};
 type Hub={markets:Market[];performance:Performance;history:History[];accounts:{id:string;name:string;krw_cash:string;usd_cash:string;holdings:number}[];recommendations:Recommendation[];notice:string};
 type PriceTrend={status:string;symbol:string;market:string;change_pct?:number;first_date?:string;as_of?:string;points?:{date:string;close:string}[];source?:string;reason?:string};
-type News={title:string;url:string;market:string;symbols:string[];impact:string;reason:string;confidence:string;published_utc:string;source:string};
-type NewsReport={status:string;summary:{checked:number;related:number;risk_suspected:number};news:News[];risk_suspected:News[];coverage:string};
+type News={title:string;title_ko?:string|null;translation_status?:string;publisher?:string;editorial_lean?:string;editorial_source?:string|null;url:string;market:string;symbols:string[];impact:string;reason:string;confidence:string;published_utc:string;source:string};
+type NewsReport={status:string;summary:{checked:number;related:number;risk_suspected:number};news:News[];risk_suspected:News[];coverage:string;unavailable?:string[]};
 type Security={market:string;symbol:string;name:string;kind:string;source:string;updated_at:string};
 type Catalog={items:Security[];total:number;is_complete:boolean;catalog_status:Record<string,{status:string;download_rows:number}>;notice:string};
 type Factor={status:'scored'|'unavailable';score:number|null;why:string[];risks:string[];metrics:Record<string,unknown>;sources:SourceEvidence[];reason?:string};
@@ -48,7 +48,7 @@ function AssetGraph({data}:{data:History[]}){
   </svg>;
 }
 export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
-  const [tab,setTab]=useState<'home'|'search'>('home');
+  const [tab,setTab]=useState<'home'|'search'>(['/analysis','/search'].includes(window.location.pathname)?'search':'home');
   const [hub,setHub]=useState<Hub|null>(null);
   const [news,setNews]=useState<NewsReport|null>(null);
   const [error,setError]=useState('');
@@ -60,7 +60,9 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
   const [query,setQuery]=useState('');
   const [market,setMarket]=useState('ALL');
   const [kind,setKind]=useState('ALL');
+  const [catalogOffset,setCatalogOffset]=useState(0);
   const [catalog,setCatalog]=useState<Catalog|null>(null);
+  const [screen,setScreen]=useState<{screened:number;ready:number;items:{symbol:string;status:string;score:number|null;coverage_pct:number}[]}|null>(null);
   const [selected,setSelected]=useState<Security|null>(null);
   const [selectedQuote,setSelectedQuote]=useState<{status:string;price?:string;currency?:string;as_of?:string;source?:string}|null>(null);
   const [riskUnread,setRiskUnread]=useState(0);
@@ -83,17 +85,20 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
     // external quote/news provider stalls one of the expensive report APIs.
     void read<Stage8Result>('/api/v1/stage1/stage8-simulation')
       .then(setStage8).catch(()=>setStage8(null));
-    const results=await Promise.allSettled([read<Hub>('/api/v1/stage1/hub'),read<NewsReport>('/api/v1/stage1/news-30d'),
-      read<QuantBatch>('/api/v1/stage1/quantitative'),
-      read<PaperPlan>('/api/v1/stage1/portfolio-plan'),
-      read<Stage5Accounting>('/api/v1/stage1/accounting'),
-      read<RiskReport>('/api/v1/stage1/risk-review')]);
-    if(results[0].status==='fulfilled')setHub(results[0].value);else setError('시장·자산 평가를 확인하지 못했습니다. 서버와 가격 공급원을 확인하세요.');
-    if(results[1].status==='fulfilled')setNews(results[1].value);
-    if(results[2].status==='fulfilled')setQuant(results[2].value);else setQuant(null);
-    if(results[3].status==='fulfilled')setPlan(results[3].value);else setPlan(null);
-    if(results[4].status==='fulfilled')setAccounting(results[4].value);else setAccounting(null);
-    if(results[5].status==='fulfilled')setRiskReview(results[5].value);else setRiskReview(null);
+    // Render each panel as soon as its own API returns. Slow public news
+    // feeds must never delay visible local owner cash or account data.
+    const requests=[
+      read<Hub>('/api/v1/stage1/hub').then(setHub).catch(()=>setError('시장·자산 정보 조회 실패. 계좌 자료를 별도 확인하세요.')),
+      read<NewsReport>('/api/v1/stage1/news-30d').then(setNews).catch(()=>setNews({
+        status:'unavailable',summary:{checked:0,related:0,risk_suspected:0},
+        news:[],risk_suspected:[],coverage:'RSS 통신 또는 서버 처리 실패',unavailable:['KR','US']
+      })),
+      read<QuantBatch>('/api/v1/stage1/quantitative').then(setQuant).catch(()=>setQuant(null)),
+      read<PaperPlan>('/api/v1/stage1/portfolio-plan').then(setPlan).catch(()=>setPlan(null)),
+      read<Stage5Accounting>('/api/v1/stage1/accounting').then(setAccounting).catch(()=>setAccounting(null)),
+      read<RiskReport>('/api/v1/stage1/risk-review').then(setRiskReview).catch(()=>setRiskReview(null))
+    ];
+    await Promise.allSettled(requests);
 
     const inbox=await read<{items:{event_id:string;read_at:string|null}[]}>('/api/v1/stage1/inbox').catch(()=>null);
     if(inbox)setRiskUnread(inbox.items.filter(x=>x.event_id.startsWith('risk:')&&!x.read_at).length);
@@ -103,10 +108,10 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
   }
   useEffect(()=>{void loadHome();const interval=setInterval(()=>void loadHome(),300_000);return()=>clearInterval(interval);},[]);
   useEffect(()=>{if(tab!=='search')return;let active=true;
-    const delay=setTimeout(()=>{read<Catalog>('/api/v1/stage1/securities?'+new URLSearchParams({q:query,market,kind,limit:'50'}))
+    const delay=setTimeout(()=>{read<Catalog>('/api/v1/stage1/securities?'+new URLSearchParams({q:query,market,kind,limit:'50',offset:String(catalogOffset)}))
       .then(r=>{if(active)setCatalog(r);}).catch(()=>{if(active)setError('종목목록 검색에 실패했습니다.');});},280);
     return()=>{active=false;clearTimeout(delay);};
-  },[tab,query,market,kind]);
+  },[tab,query,market,kind,catalogOffset]);
   const relevantNews=useMemo(()=>detail&&news?news.news.filter(n=>n.symbols.includes(detail.symbol)).slice(0,5):[],[detail,news]);
   const activeQuant=useMemo(()=>detail?quant?.items.find(x=>x.symbol===detail.symbol)??null:null,[detail,quant]);
   const sandbox=stage8?.status==='ready'&&stage8.scenario.status==='completed_sandbox_only'
@@ -221,7 +226,7 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
     </div>}
     {tab==='home'?<main className="wh-grid">
       <section className="wh-card wh-markets"><div className="wh-head"><b>시장 현황</b><small>지연 일간 종가 · 기준일 표시</small></div><div className="wh-indexgrid">
-        {(hub?.markets??[{name:'KOSPI'},{name:'KOSDAQ'},{name:'S&P 500'},{name:'NASDAQ'}]).map(m=><div className="wh-index" key={m.name}><small>{m.name}</small><strong>{'value'in m&&m.value!==null&&m.value!==undefined?fmt(m.value,2):'미확인'}</strong><span>{'change_pct'in m&&m.change_pct!==null&&m.change_pct!==undefined?(m.change_pct>0?'+':'')+m.change_pct+'%':'등락 미확인'}</span><small>{'as_of'in m&&m.as_of?m.as_of:'원본 시세 대기'}</small></div>)}
+        {(hub?.markets??[{name:'KOSPI'},{name:'KOSDAQ'},{name:'S&P 500'},{name:'NASDAQ'}]).map(m=><div className="wh-index" key={m.name}><small>{m.name}</small><strong>{'value'in m&&m.value!==null&&m.value!==undefined?fmt(m.value,2):'미확인'}</strong><span>{'change_pct'in m&&m.change_pct!==null&&m.change_pct!==undefined?(m.change_pct>0?'+':'')+m.change_pct+'%':'등락 미확인'}</span><small title={'source'in m && m.source ? m.source : '공개 시장자료 수집 대기'}>{'as_of'in m&&m.as_of?'기준일 '+m.as_of:'시세 공급원 미응답 · 인터넷 연결과 데이터 제공 상태 확인'}</small></div>)}
         </div></section>
       <section className="wh-card wh-assets"><div className="wh-head"><b>내 총자산 흐름</b>
         <button className="wh-plan-trigger" onClick={()=>setShowAccounting(true)}>
@@ -239,9 +244,27 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
         {(hub?.accounts??actualAccounts).map(a=><div className="wh-account" key={a.id}><b>{a.id==='default'?'미국 일반':a.id==='kr-base'?'한국 일반':a.id==='isa-base'?'ISA':a.name}</b><span>₩{fmt(a.krw_cash)} · ${fmt(a.usd_cash,2)}</span><small>보유 {a.holdings}종</small></div>)}
         {!hub&&actualAccounts.length===0&&<p>실제 가상계좌 데이터 확인 중</p>}</section>
       <section className="wh-card wh-news"><div className="wh-head"><b>최근 30일 뉴스·보유종목 영향</b><small>{news?.summary.checked??0}건 검토 · 관련 {news?.summary.related??0}건</small></div>
-        <div className="wh-feed">{(news?.news??[]).slice(0,5).map((n,i)=><div className="wh-newsrow" key={i}><span className={n.impact==='하방 위험 의심'?'wh-danger':''}>{n.impact}</span><a href={n.url} target="_blank" rel="noreferrer">{n.title}</a><small>{n.symbols.join(', ')||n.market}</small></div>)}
-          {!news?.news.length&&<p>최근 30일 기사를 아직 확인하지 못했습니다.</p>}</div>
-        <small className="wh-caveat">제목 기반 관련성 분석이며 실제 가격 영향은 미확인입니다.</small></section>
+        <div className="wh-feed">
+          <h4>해외 뉴스 · 한국어 번역</h4>
+          {(news?.news??[]).filter(n=>n.market==='US').slice(0,15).map((n,i)=><div className="wh-newsrow" key={'us'+i}>
+            <span className={n.impact==='하방 위험 의심'?'wh-danger':''}>{n.impact}</span>
+            <a href={n.url} target="_blank" rel="noreferrer">{n.title_ko??n.title}</a>
+            <small>{n.title_ko?'자동 번역 · 원문 링크 제공':'번역 서비스 실패 · 영어 원문'} · {n.publisher??'언론사 미확인'}</small>
+          </div>)}
+          <h4>한국 뉴스 · 언론사별</h4>
+          {[...new Set((news?.news??[]).filter(n=>n.market==='KR').map(n=>n.publisher??'언론사 미확인'))].map(pub=>
+            <div key={pub} className="wh-publisher-group">
+              <b>{pub}</b>
+              {(news?.news??[]).filter(n=>n.market==='KR'&&(n.publisher??'언론사 미확인')===pub).map((n,i)=>
+                <div className="wh-newsrow" key={'kr'+i}>
+                  <span>{n.editorial_lean??'정치 성향 근거 미확인'}</span>
+                  <a href={n.url} target="_blank" rel="noreferrer">{n.title}</a>
+                  {n.editorial_source&&<small><a href={n.editorial_source} target="_blank" rel="noreferrer">성향 분류 연구 보기 ↗</a></small>}
+                </div>)}
+            </div>)}
+          {!news?.news.length&&<p>{news?.status==='partial'?'일부 뉴스 수집 실패':news?.status==='ok'?'검색 범위에서 확인된 기사 없음':'뉴스 수집 실패'} · {news?.unavailable?.length?'미응답 시장: '+news.unavailable.join(', '):'공개 RSS 또는 네트워크 상태 미확인'}. 미국·한국 공개 뉴스 공급원이 응답하지 않으면 기사 내용을 임의로 생성하지 않습니다.</p>}
+        </div>
+        <small className="wh-caveat">한국 언론사의 정치 성향은 과거 연구의 분류를 참고한 것이며 해당 기사 자체의 성향이나 사실 여부를 뜻하지 않습니다. 해외 기사는 번역 실패 시 원문을 표시합니다.</small></section>
       <section className="wh-card wh-risks"><div className="wh-head"><b>보유종목 위험 알림</b>
         <button className="wh-plan-trigger" onClick={()=>setShowRiskReview(true)}
           title="과거 변동성·상관관계·가정 충격·위험 근거 확인">
@@ -273,14 +296,29 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
           </button>)}
       </div><small className="wh-caveat">{!rankedRecommendations.length&&sandbox?
           '검증용 합성 시세 예시이며 실제 투자·추천이 아닙니다.':'정량 평가는 저장된 검증자료만 사용하며, 주문과 분리된 읽기 전용 연구입니다.'}</small></section>
-    </main>:<main className="wh-search"><div className="wh-searchbar"><div><h2>미국·한국 상장종목 검색</h2><p>공개 종목목록 캐시 · 가격은 선택 시 조회</p></div>
-       <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="이름 또는 종목코드 (예: 삼성전자, AAPL)"/>
-       <select value={market} onChange={e=>setMarket(e.target.value)}><option value="ALL">전체 시장</option><option value="KR">한국</option><option value="US">미국</option></select>
-       <select value={kind} onChange={e=>setKind(e.target.value)}><option value="ALL">전체 상품</option><option value="STOCK">개별주</option><option value="ETF">ETF</option></select>
+    </main>:<main className="wh-search"><div className="wh-searchbar"><div><h2>미국·한국 주식·ETF 검색</h2><p>공개 상장목록 기반 검색 · 시세와 매매 적격성은 별도 확인</p></div>
+       <nav aria-label="종목 시장별 빠른 선택" style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+         {([['US','STOCK','미국 주식'],['KR','STOCK','한국 주식'],['ALL','ETF','미국·한국 ETF'],['ALL','ALL','모든 종목']] as const).map(([m,k,label])=>
+           <button key={label} type="button" aria-pressed={market===m&&kind===k}
+             onClick={()=>{setMarket(m);setKind(k);setCatalogOffset(0);setScreen(null);setSelected(null);}}>
+             {label}</button>)}
+       </nav>
+       <input value={query} onChange={e=>{setQuery(e.target.value);setCatalogOffset(0);}} placeholder="이름 또는 종목코드 (예: 삼성전자, AAPL)"/>
+       <select value={market} onChange={e=>{setMarket(e.target.value);setCatalogOffset(0);}}><option value="ALL">전체 시장</option><option value="KR">한국</option><option value="US">미국</option></select>
+       <select value={kind} onChange={e=>{setKind(e.target.value);setCatalogOffset(0);}}><option value="ALL">전체 상품</option><option value="STOCK">개별주</option><option value="ETF">ETF</option></select>
        <button disabled={busy} onClick={()=>void refreshCatalog()}>전체 목록 갱신</button></div>
-       <div className="wh-catalog"><div className="wh-searchresults"><div className="wh-head"><b>검색 결과 {fmt(catalog?.total)}개</b><small>한 번에 최대 50종목</small></div>
+       <div className="wh-catalog"><div className="wh-searchresults"><div className="wh-head"><b>검색 결과 {fmt(catalog?.total)}개</b><small>미국 {catalog?.catalog_status?.US?.download_rows??'미확인'}개 · 한국 {catalog?.catalog_status?.KR?.download_rows??'미확인'}개 수집 기록 · 최대 50개/페이지</small></div>
+         <button disabled={busy} onClick={()=>{setScreen(null);void read<{screened:number;ready:number;items:{symbol:string;status:string;score:number|null;coverage_pct:number}[]}>('/api/v1/stage1/screen?'+new URLSearchParams({q:query,market,kind,limit:'20'})).then(setScreen).catch(()=>setError('정량 검색 결과를 확인할 수 없습니다.'));}}>현재 검색조건 상위 20개 정량 평가</button>
+         {screen&&<div role="status"><b>평가 {screen.screened}종 · 분석 가능 {screen.ready}종</b><small>미확인 전략은 점수를 임의로 채우지 않습니다. 자동매매와 분리된 참고 정보입니다.</small>
+           {screen.items.map(x=><p key={x.symbol}>{x.symbol} · {x.score===null?'자료 부족':x.score+'점'} · 충족률 {x.coverage_pct??0}%</p>)}</div>}
          {(catalog?.items??[]).map(x=><button key={x.market+x.symbol} onClick={()=>void openSecurity(x)}><b>{x.symbol}</b><span>{x.name}</span><small>{x.market} · {x.kind}</small></button>)}
-         {!catalog?.items.length&&<p>검색 결과가 없습니다. 공개 목록 갱신을 시도해 보세요.</p>}</div>
+         {!catalog?.items.length&&<p>검색 결과가 없습니다. 공개 목록 갱신을 눌러 미국 Nasdaq Trader·한국 KIND 목록을 불러오세요. 외부 사이트 연결 실패 시 기존 캐시만 표시됩니다.</p>}
+         <div style={{display:'flex',gap:8,alignItems:'center'}}>
+           <button type="button" disabled={catalogOffset===0} onClick={()=>setCatalogOffset(v=>Math.max(0,v-50))}>이전 50개</button>
+           <span>{catalog?.total?catalogOffset+1:0}~{Math.min(catalogOffset+50,catalog?.total??0)} / {catalog?.total??0}개</span>
+           <button type="button" disabled={!catalog||catalogOffset+50>=catalog.total} onClick={()=>setCatalogOffset(v=>v+50)}>다음 50개</button>
+         </div>
+         <p><small>상장 목록에는 거래정지·상장폐지 반영 지연이나 ETF 누락이 있을 수 있습니다. 검색 가능과 거래 가능은 다릅니다.</small></p></div>
        <div className="wh-security"><h3>종목 상세</h3>{selected?<><h2>{selected.name}</h2><p>{selected.symbol} · {selected.market} · {selected.kind}</p>
          <p>기준 종가: {selectedQuote?.status==='ok'?fmt(selectedQuote.price,2)+' '+(selectedQuote.currency||''):'검증되지 않음'}</p><p>기준일: {selectedQuote?.as_of??'미확인'}</p><p>출처: {selectedQuote?.source??selected.source}</p>
          <div className="wh-assessment"><b>8전략 정량 연구</b>

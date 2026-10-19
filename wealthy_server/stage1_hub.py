@@ -22,6 +22,23 @@ from .stage1_inbox import _schema as inbox_schema
 from .stage1_decisions import proposal
 from .stage1_strategy_policy import StrategyPolicy
 
+# Historical scholarly classifications, NOT a claim that every article shares a viewpoint.
+_EDITORIAL_STUDY="https://www.kci.go.kr/kciportal/ci/sereArticleSearch/ciSereArtiView.kci?sereArticleSearchBean.artiId=ART001533645"
+_EDITORIAL_STUDY_2="https://www.kci.go.kr/kciportal/ci/sereArticleSearch/ciSereArtiView.kci?sereArticleSearchBean.artiId=ART001372728"
+_EDITORIAL_OUTLETS=(
+    (("조선일보","chosun ilbo"),"보수 성향으로 분류된 연구 있음",_EDITORIAL_STUDY),
+    (("동아일보","donga ilbo","dong-a ilbo"),"보수 성향으로 분류된 연구 있음",_EDITORIAL_STUDY),
+    (("중앙일보","joongang ilbo"),"보수 성향으로 분류된 연구 있음",_EDITORIAL_STUDY_2),
+    (("한겨레","hankyoreh"),"진보 성향으로 분류된 연구 있음",_EDITORIAL_STUDY),
+    (("경향신문","kyunghyang"),"진보 성향으로 분류된 연구 있음",_EDITORIAL_STUDY),
+)
+def _editorial_context(publisher):
+    key=publisher.strip().casefold()
+    for names,label,source in _EDITORIAL_OUTLETS:
+        if key in names:
+            return label,source
+    return "평가 근거 미확인",None
+
 INDEXES=(("KOSPI","^KS11"),("KOSDAQ","^KQ11"),
          ("S&P 500","^GSPC"),("NASDAQ","^IXIC"))
 
@@ -56,6 +73,7 @@ def market_indices():
 
 def news_30d(*,now=None,fetcher=None,limit=30):
     now=now or datetime.now(timezone.utc)
+    live_fetcher=fetcher is None
     fetcher=fetcher or _fetch_rss
     summaries=[]
     missing=[]
@@ -76,25 +94,68 @@ def news_30d(*,now=None,fetcher=None,limit=30):
     for item in summaries:
         dedup[(item["market"],item["title"].casefold())]=item
     items=sorted(dedup.values(),key=lambda x:x["published_utc"],reverse=True)[:limit]
-    return {"items":items,"status":"partial" if missing else "ok","unavailable":missing,
-            "coverage":"공개 Google News RSS 검색의 최근 30일 결과 일부. 모든 기사·원문 분석 보장 안 함"}
+    if items:
+        from .stage1_research import translate_headline_redundant
+        english=[i for i in items if i["market"]=="US"][:12] if live_fetcher else []
+        if english:
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                translations=list(pool.map(translate_headline_redundant,[i["title"] for i in english]))
+            for item,translated in zip(english,translations):
+                item["title_ko"]=translated
+                item["translation_status"]="translated_external" if translated else "translation_unavailable"
+    return {"items":items,"status":"partial" if missing and items else "unavailable" if not items else "ok","unavailable":missing,
+            "coverage":"공개 언론사 및 뉴스 검색 RSS의 최근 30일 결과 일부. 전체 기사·원문 분석 보장 안 함"}
 
 def _fetch_rss(query,market,language):
     params={"q":query,"hl":"ko","gl":"KR","ceid":"KR:ko"} if language=="ko" else {
         "q":query,"hl":"en-US","gl":"US","ceid":"US:en"}
-    url="https://news.google.com/rss/search?"+urllib.parse.urlencode(params)
-    req=urllib.request.Request(url,headers={"User-Agent":"Mozilla/5.0 WealthyPersonalResearch"})
-    with urllib.request.urlopen(req,timeout=6) as response:
-        raw=response.read(230_001)
-    if len(raw)>230_000:raise ValueError("oversized")
-    root=ET.fromstring(raw)
+    base="https://news.google.com/rss/search?"
+    candidates=[base+urllib.parse.urlencode(params)]
+    # Query syntax may return no items; retry a simpler topic before giving up.
+    simpler=dict(params);simpler["q"]="주식 코스피" if language=="ko" else "stocks markets"
+    candidates.append(base+urllib.parse.urlencode(simpler))
+    # Independent public publisher feed if Google News is unavailable for US.
+    if market=="US":
+        candidates.append("https://feeds.bbci.co.uk/news/business/rss.xml")
+    else:
+        candidates.extend(("https://www.mk.co.kr/rss/50200011/",
+                           "https://www.hankyung.com/feed/finance",
+                           "https://www.yna.co.kr/rss/economy.xml"))
+    root=None
+    for url in candidates:
+        try:
+            req=urllib.request.Request(url,headers={"User-Agent":"Mozilla/5.0 WealthyPersonalResearch"})
+            with urllib.request.urlopen(req,timeout=6) as response:
+                raw=response.read(230_001)
+            if len(raw)>230_000:raise ValueError("oversized")
+            parsed=ET.fromstring(raw)
+            if parsed.findall("./channel/item"):
+                root=parsed
+                break
+        except (OSError,ValueError,ET.ParseError):
+            continue
+    if root is None:
+        raise OSError("Google News RSS unavailable or zero items in both queries")
     items=[]
     for row in root.findall("./channel/item")[:90]:
         title=(row.findtext("title") or "").strip()[:250]
         link=(row.findtext("link") or "").strip()
         pub=(row.findtext("pubDate") or "").strip()
-        if title and link.startswith("https://news.google.com/") and pub:
-            items.append({"title":title,"url":link,"published":pub,"source":"Google News RSS"})
+        allowed_prefixes=("https://news.google.com/","https://www.bbc.com/","https://www.bbc.co.uk/",
+                          "https://www.mk.co.kr/","https://www.hankyung.com/","https://www.yna.co.kr/")
+        if title and any(link.startswith(prefix) for prefix in allowed_prefixes) and pub:
+            publisher=(row.findtext("source") or "").strip()[:100]
+            if not publisher:
+                publisher=("BBC News" if "bbc." in link else
+                           "매일경제" if "mk.co.kr" in link else
+                           "한국경제" if "hankyung.com" in link else
+                           "연합뉴스" if "yna.co.kr" in link else "언론사 미확인")
+            editorial,source_url=_editorial_context(publisher) if market=="KR" else ("해당 없음",None)
+            feed_source="Google News RSS" if "news.google.com" in link else publisher+" RSS"
+            items.append({"title":title,"url":link,"published":pub,"source":feed_source,
+                          "publisher":publisher,"editorial_lean":editorial,
+                          "editorial_source":source_url,
+                          "editorial_basis":"과거 연구의 매체별 분류로, 현재 해당 기사나 언론사의 고정된 정치색을 증명하지 않습니다."})
     return items
 
 def _classify(item,holdings):
@@ -163,16 +224,37 @@ def asset_history(owner,portfolios,ledger,*,performance=None,now=None):
 
 def dashboard(owner,portfolios,ledger,prefs,*,market_provider=market_indices,
               report_provider=None,decision_provider=None):
-    # Separate failures by panel, never hide a market data problem behind a
-    # fabricated amount. Slow providers should be cached by the caller.
-    p=portfolio_report(owner,portfolios,ledger) if report_provider is None else report_provider()
-    history=asset_history(owner,portfolios,ledger,performance=p)
-    decision=(decision_provider() if decision_provider else
-              proposal(owner,portfolios,prefs,StrategyPolicy(portfolios)))
+    """Keep owner cash visible when market/news/recommendation services fail.
+
+    Do not swallow errors reading the actual account ledger or invent valuations.
+    """
     accounts=portfolios.list(owner)["accounts"]
-    return {"markets":market_provider(),"performance":p,"history":history,
+    errors=[]
+    try:
+        p=portfolio_report(owner,portfolios,ledger) if report_provider is None else report_provider()
+        history=asset_history(owner,portfolios,ledger,performance=p)
+    except (OSError,ValueError,KeyError,TypeError,ArithmeticError):
+        errors.append("valuation_unavailable")
+        p={"complete":False,"portfolio_value_krw":None,"contributions_krw":None,
+           "return_krw":None,"missing":[]}
+        history=[]
+    try:
+        decision=(decision_provider() if decision_provider else
+                  proposal(owner,portfolios,prefs,StrategyPolicy(portfolios)))
+    except (OSError,ValueError,KeyError,TypeError,ArithmeticError):
+        errors.append("decision_unavailable")
+        decision={"recommendations":[],"coverage_limitations":["투자 판단에 필요한 자료를 확인하지 못했습니다."]}
+    try:
+        markets=market_provider()
+    except (OSError,ValueError,KeyError,TypeError,ArithmeticError):
+        errors.append("markets_unavailable")
+        markets=[{"name":name,"status":"unavailable","value":None,
+                  "change_pct":None,"as_of":None,"source":"source unavailable"}
+                 for name,_ in INDEXES]
+    return {"markets":markets,"performance":p,"history":history,
             "accounts":[{"id":a["id"],"name":a["name"],"krw_cash":a["krw_cash"],
                "usd_cash":a["usd_cash"],"holdings":len(a["holdings"])} for a in accounts],
             "recommendations":decision["recommendations"][:8],
             "decision_constraints":decision["coverage_limitations"],
-            "notice":"시장 데이터는 지연 종가입니다. 일별 자산 차트는 실제 기록한 날짜부터 누적되며 과거값을 생성하지 않습니다."}
+            "partial_errors":errors,
+            "notice":"검증된 자료만 표시합니다. 외부 시장자료 오류는 가상계좌 현금 조회를 차단하지 않습니다."}

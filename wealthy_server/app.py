@@ -676,6 +676,22 @@ def create_app(
                 raise _error(422,"PAPER_PLAN_EXECUTION_REJECTED",
                              "가상주문 통합 위험·잔액 검증에서 실행이 거부되었습니다.") from None
 
+        @app.get("/api/v1/stage1/screen")
+        def stage10_screen(q: str = "", market: str = "ALL", kind: str = "ALL",
+                           limit: int = 20, offset: int = 0,
+                           actor: Actor = Depends(current_actor)) -> dict[str, Any]:
+            """Search-backed, verified-cache-only 8-factor screener. No order side effects."""
+            from .stage10_screener import screen
+            try:
+                weights=stage1_strategy_policy.get(actor.owner_id)["weights"]
+                accounts=portfolio_store.list(actor.owner_id)["accounts"]
+                holdings=[h for a in accounts for h in a["holdings"]]
+                return screen(portfolio_store,stage2_store,weights,q=q,market=market,
+                              kind=kind,limit=limit,offset=offset,holdings=holdings)
+            except ValueError:
+                raise _error(400,"STAGE10_SCREEN_INVALID",
+                             "검색 조건이나 투자전략 설정이 올바르지 않습니다.") from None
+
         @app.get("/api/v1/stage1/quantitative")
         def stage3_quantitative(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
             """All candidate quant scores are cache-based and cannot trade."""
@@ -835,6 +851,47 @@ def create_app(
                 return portfolio_store.create(actor.owner_id, body.name, body.kind)
             except ValueError:
                 raise _error(400, "INVALID_PORTFOLIO", "가상계좌 이름 또는 유형을 확인해 주세요.") from None
+
+        class ManualAssetBody(BaseModel):
+            account: str
+            symbol: str
+            currency: str
+            quantity: str
+            side: str
+            unit_price: str | None = None
+            trade_date: str | None = None
+
+        class ManualBalanceBody(BaseModel):
+            label: str
+            currency: str
+            amount: str
+            side: str
+
+        @app.post("/api/v1/stage1/manual-assets/balance")
+        def stage10_adjust_manual_balance(body: ManualBalanceBody,
+                                           actor: Actor = Depends(mutation_actor)) -> dict[str, Any]:
+            from .stage10_manual_assets import adjust_balance
+            try:
+                return adjust_balance(portfolio_store,actor.owner_id,body.label,
+                                      body.currency,body.amount,body.side)
+            except ValueError:
+                raise _error(400,"INVALID_MANUAL_BALANCE","자산 이름·통화·금액을 확인해 주세요.") from None
+
+        @app.get("/api/v1/stage1/manual-assets")
+        def stage10_manual_assets(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
+            from .stage10_manual_assets import list_assets
+            return list_assets(portfolio_store,actor.owner_id)
+
+        @app.post("/api/v1/stage1/manual-assets")
+        def stage10_adjust_manual_asset(body: ManualAssetBody,
+                                        actor: Actor = Depends(mutation_actor)) -> dict[str, Any]:
+            from .stage10_manual_assets import adjust
+            try:
+                return adjust(portfolio_store,actor.owner_id,body.account,
+                              body.symbol,body.currency,body.quantity,body.side,
+                              unit_price=body.unit_price,trade_date=body.trade_date)
+            except ValueError:
+                raise _error(400,"INVALID_MANUAL_ASSET","계좌·종목·보유수량을 확인해 주세요.") from None
 
         @app.get("/api/v1/stage1/portfolios/{portfolio_id}/orders")
         def stage1_orders(portfolio_id: str, actor: Actor = Depends(current_actor)) -> dict[str, Any]:

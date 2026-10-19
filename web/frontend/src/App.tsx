@@ -4,7 +4,6 @@ import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "reac
 import { LoginPage, useAuth } from "./auth";
 import {
   AccountsPage,
-  AnalysisPage,
   AssetsPage,
   AutomationPage,
   DividendPage,
@@ -14,7 +13,6 @@ import {
   ProviderSettingsPage,
   ReportsPage,
   RiskPage,
-  SearchPage,
   SettingsPage,
   StrategyDetailPage,
   StrategyLibraryPage,
@@ -44,7 +42,7 @@ const navItems = [
   { to: "/reports", icon: "▥", label: "보고서" },
   { to: "/automation", icon: "↻", label: "자동화 관리" },
   { to: "/providers/kis", icon: "⌘", label: "KIS API 설정" },
-  { to: "/settings", icon: "⚙", label: "공통 설정" }
+  { to: "/settings", icon: "⚙", label: "설정" }
 ];
 
 function initialTheme(): Theme {
@@ -100,8 +98,8 @@ function Shell({ theme, setTheme }: { theme: Theme; setTheme: (value: Theme) => 
           <Route path="/strategies" element={<StrategyMixPage />} />
           <Route path="/strategy-library" element={<StrategyLibraryPage />} />
           <Route path="/strategies/:strategyId" element={<StrategyDetailPage />} />
-          <Route path="/search" element={<SearchPage />} />
-          <Route path="/analysis" element={<AnalysisPage />} />
+          <Route path="/search" element={<Stage1Page />} />
+          <Route path="/analysis" element={<Stage1Page />} />
           <Route path="/tax" element={<TaxPage />} />
           <Route path="/dividends" element={<DividendPage />} />
           <Route path="/market" element={<MarketPage />} />

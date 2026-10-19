@@ -592,20 +592,43 @@ class PortfolioEngine:
                     # Concurrent manual fills also consume the daily cash
                     # budget. Executed Stage4 claims are counted from fills;
                     # only unfilled claims are counted separately.
+                    if choice["side"]=="BUY":
+                        holdings_now=db.execute("""SELECT
+                            COALESCE(SUM(CASE WHEN side='BUY' THEN quantity
+                                ELSE -quantity END),0)
+                            FROM virtual_orders WHERE owner=? AND symbol=?""",
+                            (owner,choice["symbol"])).fetchone()[0]
+                        cap=(SINGLE_ETF_CAP if choice["kind"]=="ETF"
+                             else SINGLE_STOCK_CAP)*_decimal(plan["portfolio_value_krw"])
+                        if (holdings_now+choice["quantity"])*live*(
+                                rate if expected=="USD" else Decimal(1))>cap:
+                            db.execute("COMMIT")
+                            claims.append({"request_id":key,"symbol":choice["symbol"],
+                                           "status":"skipped","reason":"CONCENTRATION_CAP_CHANGED"})
+                            continue
                     day_kst=_signed_day(now)
                     start=datetime.combine(day_kst,datetime.min.time(),tzinfo=KST).astimezone(timezone.utc)
                     end=start+timedelta(days=1)
-                    completed=db.execute("""SELECT portfolio,request_id,quantity,
-                        price,currency FROM virtual_orders
-                        WHERE owner=? AND side='BUY' AND created_at>=?
-                        AND created_at<?""",
+                    completed=db.execute("""SELECT o.portfolio,o.request_id,o.quantity,
+                        o.price,o.currency,m.foreign_exchange_rate
+                        FROM virtual_orders AS o
+                        LEFT JOIN stage1_trade_metadata AS m
+                        ON m.owner=o.owner AND m.portfolio=o.portfolio
+                           AND m.order_key=o.request_id
+                        WHERE o.owner=? AND o.side='BUY' AND o.created_at>=?
+                        AND o.created_at<?""",
                         (owner,start.isoformat(),end.isoformat())).fetchall()
                     used=Decimal(0)
                     complete_keys=set()
-                    for account_id,request,qty,unit_price,currency in completed:
-                        converted=rate if currency=="USD" else Decimal(1)
-                        if converted is None:
-                            raise ValueError("MISSING_FX_FOR_HISTORICAL_DAILY_CAP")
+                    for account_id,request,qty,unit_price,currency,historic_fx in completed:
+                        if currency=="USD":
+                            if historic_fx is None:
+                                raise ValueError("MISSING_FX_FOR_HISTORICAL_DAILY_CAP")
+                            converted=_decimal(historic_fx)
+                            if not 100<=converted<=10000:
+                                raise ValueError("INVALID_HISTORICAL_DAILY_CAP_FX")
+                        else:
+                            converted=Decimal(1)
                         used+=_decimal(unit_price)*_decimal(qty)*converted
                         complete_keys.add((account_id,request))
                     prefix=f"s4:{day_kst:%Y%m%d}:"
@@ -623,20 +646,6 @@ class PortfolioEngine:
                         claims.append({"request_id":key,"symbol":choice["symbol"],
                                        "status":"skipped","reason":"DAILY_CAP_EXCEEDED"})
                         continue
-                    if choice["side"]=="BUY":
-                        holdings_now=db.execute("""SELECT
-                            COALESCE(SUM(CASE WHEN side='BUY' THEN quantity
-                                ELSE -quantity END),0)
-                            FROM virtual_orders WHERE owner=? AND symbol=?""",
-                            (owner,choice["symbol"])).fetchone()[0]
-                        cap=(SINGLE_ETF_CAP if choice["kind"]=="ETF"
-                             else SINGLE_STOCK_CAP)*_decimal(plan["portfolio_value_krw"])
-                        if (holdings_now+choice["quantity"])*live*(
-                                rate if expected=="USD" else Decimal(1))>cap:
-                            db.execute("COMMIT")
-                            claims.append({"request_id":key,"symbol":choice["symbol"],
-                                           "status":"skipped","reason":"CONCENTRATION_CAP_CHANGED"})
-                            continue
                     db.execute("""INSERT INTO stage4_execution_claims VALUES
                         (?,?,?,?,?,?,?,?,?,?,?,?)""",
                         (owner,key,plan["plan_hash"],choice["account"],
