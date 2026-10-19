@@ -13,3 +13,10 @@
 .manual-form-grid button{border-radius:.6rem}
 .manual-assets-content>p{line-height:1.55;overflow-wrap:anywhere}
 @media(max-width:600px){.manual-form-grid{grid-template-columns:1fr 1fr}.manual-form-grid input[aria-label="보유 종목 코드"],.manual-form-grid input[aria-label="직접 자산 이름"]{grid-column:1/-1}}
+
+.manual-assets .manual-action{font-weight:650;border:1px solid var(--border,#637586);transition:filter .15s,transform .15s;cursor:pointer}
+.manual-assets .manual-action:not(:disabled):hover{filter:brightness(1.06);transform:translateY(-1px)}
+.manual-assets .manual-action:disabled{opacity:.5;cursor:not-allowed}
+.manual-assets .manual-action-add{background:var(--accent,#276b74);border-color:var(--accent,#276b74);color:#fff}
+.manual-assets .manual-action-remove{background:transparent;color:inherit;border-color:var(--border,#8293a4)}
+.manual-assets input:focus-visible,.manual-assets button:focus-visible,.manual-assets select:focus-visible{outline:2px solid var(--accent,#276b74);outline-offset:2px}
