@@ -52,16 +52,16 @@ export function ManualAssetsPanel(){
       <input aria-label="주식 수량" inputMode="decimal" value={quantity} onChange={e=>setQuantity(e.target.value)}/>
       <input aria-label="매매 단가 (선택)" inputMode="decimal" value={unitPrice} onChange={e=>setUnitPrice(e.target.value)} placeholder="주당 매수가 (선택)"/>
       <input aria-label="매매 날짜 (선택)" type="date" value={tradeDate} onChange={e=>setTradeDate(e.target.value)}/>
-      <button type="button" disabled={busy} onClick={()=>void change('/api/v1/stage1/manual-assets',{account,symbol,currency,quantity,unit_price:unitPrice||null,trade_date:tradeDate||null,side:'ADD'})}>+ 주식 추가</button>
-      <button type="button" disabled={busy} onClick={()=>void change('/api/v1/stage1/manual-assets',{account,symbol,currency,quantity,unit_price:unitPrice||null,trade_date:tradeDate||null,side:'REMOVE'})}>− 주식 차감</button>
+      <button type="button" disabled={busy} onClick={()=>void change('/api/v1/stage1/manual-assets',{account,symbol,currency,quantity,unit_price:unitPrice||null,trade_date:tradeDate||null,side:'ADD'})}className="manual-action manual-action-add">+ 주식 추가</button>
+      <button type="button" disabled={busy} onClick={()=>void change('/api/v1/stage1/manual-assets',{account,symbol,currency,quantity,unit_price:unitPrice||null,trade_date:tradeDate||null,side:'REMOVE'})}className="manual-action manual-action-remove">− 주식 차감</button>
     </div>
     <h3>현금·예금 등 별도 자산</h3>
     <div className="manual-form-grid">
       <input aria-label="직접 자산 이름" value={label} onChange={e=>setLabel(e.target.value)} placeholder="예금 / 현금 등"/>
       <input aria-label="증감할 자산 금액" inputMode="decimal" value={amount} onChange={e=>setAmount(e.target.value)}/>
       <select aria-label="자산 통화" value={assetCurrency} onChange={e=>setAssetCurrency(e.target.value)}><option>KRW</option><option>USD</option></select>
-      <button type="button" disabled={busy} onClick={()=>void change('/api/v1/stage1/manual-assets/balance',{label,currency:assetCurrency,amount,side:'ADD'})}>+ 자산 추가</button>
-      <button type="button" disabled={busy} onClick={()=>void change('/api/v1/stage1/manual-assets/balance',{label,currency:assetCurrency,amount,side:'REMOVE'})}>− 자산 차감</button>
+      <button type="button" disabled={busy} onClick={()=>void change('/api/v1/stage1/manual-assets/balance',{label,currency:assetCurrency,amount,side:'ADD'})}className="manual-action manual-action-add">+ 자산 추가</button>
+      <button type="button" disabled={busy} onClick={()=>void change('/api/v1/stage1/manual-assets/balance',{label,currency:assetCurrency,amount,side:'REMOVE'})}className="manual-action manual-action-remove">− 자산 차감</button>
       <button type="button" onClick={()=>void refresh()}>목록 갱신</button>
     </div>
     {message&&<p role="status">{message}</p>}
