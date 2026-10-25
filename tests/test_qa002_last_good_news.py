@@ -56,7 +56,10 @@ def test_partial_failure_preserves_other_market_cache_and_deduplicates_url(tmp_p
     assert partial["cache_status"]=="partial"
     assert {x["market"] for x in partial["items"]}=={"KR","US"}
     assert next(x for x in partial["items"] if x["market"]=="KR")["cache_status"]=="stale_cache"
-    assert next(x for x in partial["items"] if x["market"]=="US")["cache_status"]=="fresh"
+    # The same US article re-fetched successfully is still *not new*.
+    assert next(x for x in partial["items"] if x["market"]=="US")["cache_status"]=="cached"
+    assert partial["market_states"]["US"]["fetch_status"]=="ok"
+    assert partial["market_states"]["US"]["new_articles"]==0
 
 
 def test_unsafe_urls_and_other_owners_are_not_returned(tmp_path):
