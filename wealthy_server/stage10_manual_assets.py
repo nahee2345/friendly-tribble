@@ -26,6 +26,10 @@ def _schema(db):
       symbol TEXT NOT NULL,currency TEXT NOT NULL,side TEXT NOT NULL,
       quantity TEXT NOT NULL,unit_price TEXT,trade_date TEXT,recorded_at TEXT NOT NULL,
       PRIMARY KEY(owner,event_id))""")
+    db.execute("""CREATE TABLE IF NOT EXISTS stage10_manual_balance_history(
+      owner TEXT NOT NULL,event_id TEXT NOT NULL,label TEXT NOT NULL,
+      currency TEXT NOT NULL,side TEXT NOT NULL,amount TEXT NOT NULL,
+      recorded_at TEXT NOT NULL,PRIMARY KEY(owner,event_id))""")
 def list_assets(portfolios,owner):
     """User-declared REAL records; neither PAPER nor SAMPLE contributes.
 
@@ -187,25 +191,57 @@ def adjust(portfolios,owner,account,symbol,currency,quantity,side,*,unit_price=N
     return {"symbol":symbol,"quantity":str(updated),"scope":"USER_DECLARED_REAL",
             "paper_orders_added":False,"unit_price_recorded":price is not None}
 
-def adjust_balance(portfolios,owner,label,currency,amount,side):
-    """Record personal cash/other monetary assets, never alter Stage1 paper balances."""
+def adjust_balance(portfolios,owner,label,currency,amount,side,*,request_id=None):
+    """Owner-scoped declared cash event; preserved separately from PAPER cash."""
     if not isinstance(label,str) or not 1<=len(label.strip())<=60 or any(ord(v)<32 for v in label):
         raise ValueError('invalid label')
-    if currency not in ('KRW','USD') or side not in ('ADD','REMOVE'):
+    inflows=('ADD','DEPOSIT','CORRECT_ADD')
+    outflows=('REMOVE','WITHDRAW','CORRECT_REMOVE')
+    if currency not in ('KRW','USD') or side not in inflows+outflows:
         raise ValueError('invalid balance adjustment')
+    if request_id is not None and (not isinstance(request_id,str) or
+        not re.fullmatch(r"[A-Za-z0-9_:-]{8,100}",request_id)):
+        raise ValueError('invalid request id')
+    event_id=request_id or uuid4().hex
     delta=_amount(amount);label=label.strip()
     with portfolios._db() as db:
         db.execute("BEGIN IMMEDIATE")
         _schema(db)
-        row=db.execute("SELECT amount FROM stage10_manual_balances WHERE owner=? AND label=? AND currency=?",(owner,label,currency)).fetchone()
-        current=Decimal(row[0]) if row else Decimal(0)
-        updated=current+delta if side=='ADD' else current-delta
-        if updated<0:raise ValueError('insufficient manual balance')
-        if updated==0:
-            db.execute("DELETE FROM stage10_manual_balances WHERE owner=? AND label=? AND currency=?",(owner,label,currency))
-        else:
-            db.execute("""INSERT INTO stage10_manual_balances VALUES(?,?,?,?,?)
-               ON CONFLICT(owner,label,currency) DO UPDATE SET amount=excluded.amount,updated_at=excluded.updated_at""",
-               (owner,label,currency,str(updated),datetime.now(timezone.utc).isoformat()))
+        previous=db.execute(
+            "SELECT label,currency,side,amount FROM stage10_manual_balance_history "
+            "WHERE owner=? AND event_id=?", (owner,event_id)
+        ).fetchone()
+        intended=(label,currency,side,str(delta))
+        if previous is not None and previous!=intended:
+            raise ValueError('conflicting cash adjustment request')
+        if previous is None:
+            row=db.execute(
+                "SELECT amount FROM stage10_manual_balances "
+                "WHERE owner=? AND label=? AND currency=?", (owner,label,currency)
+            ).fetchone()
+            current=Decimal(row[0]) if row else Decimal(0)
+            updated=current+delta if side in inflows else current-delta
+            if updated<0:
+                raise ValueError('insufficient manual balance')
+            if updated==0:
+                db.execute(
+                    "DELETE FROM stage10_manual_balances WHERE owner=? AND label=? AND currency=?",
+                    (owner,label,currency)
+                )
+            else:
+                db.execute("""INSERT INTO stage10_manual_balances VALUES(?,?,?,?,?)
+                   ON CONFLICT(owner,label,currency) DO UPDATE SET
+                   amount=excluded.amount,updated_at=excluded.updated_at""",
+                   (owner,label,currency,str(updated),datetime.now(timezone.utc).isoformat()))
+            db.execute(
+                "INSERT INTO stage10_manual_balance_history VALUES(?,?,?,?,?,?,?)",
+                (owner,event_id,label,currency,side,str(delta),datetime.now(timezone.utc).isoformat())
+            )
         db.execute("COMMIT")
-    return {"label":label,"currency":currency,"amount":str(updated),"scope":"USER_DECLARED_REAL","paper_ledger_modified":False}
+        row=db.execute(
+            "SELECT amount FROM stage10_manual_balances "
+            "WHERE owner=? AND label=? AND currency=?", (owner,label,currency)
+        ).fetchone()
+    return {"label":label,"currency":currency,"amount":row[0] if row else "0",
+            "scope":"USER_DECLARED_REAL","paper_ledger_modified":False,
+            "status":"already_recorded" if previous is not None else "recorded"}
