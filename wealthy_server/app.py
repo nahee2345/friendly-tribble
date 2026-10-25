@@ -14,6 +14,22 @@ from pathlib import Path
 from typing import Any, Callable
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, Response, UploadFile
+from pydantic import BaseModel, Field
+
+# Local-mode HTTP contracts must be module-visible when postponed annotations
+# are enabled; otherwise FastAPI can interpret "body" as a query parameter.
+class PaperApprovalDecision(BaseModel):
+    request_id: str
+    approve: bool
+
+
+class VirtualOrderBody(BaseModel):
+    portfolio: str
+    symbol: str
+    side: str
+    quantity: int = Field(gt=0, le=100_000)
+    request_id: str
+
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
@@ -531,10 +547,6 @@ def create_app(
             from .stage1_controls import set_paused
             return set_paused(actor.owner_id, portfolio_store, body.paused, body.reason)
 
-        class PaperApprovalDecision(BaseModel):
-            request_id: str
-            approve: bool
-
         @app.get("/api/v1/stage1/approvals")
         def stage1_approval_list(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
             from .stage1_controls import list_approvals
@@ -928,13 +940,6 @@ def create_app(
                 return portfolio_store.transfer(actor.owner_id, body.source, body.destination, body.amount_krw, body.request_id)
             except ValueError:
                 raise _error(400, "INVALID_TRANSFER", "가상 계좌·잔액 또는 요청 정보를 확인해 주세요.") from None
-
-        class VirtualOrderBody(BaseModel):
-            portfolio: str
-            symbol: str
-            side: str
-            quantity: int = Field(gt=0, le=100_000)
-            request_id: str
 
         @app.get("/api/v1/stage1/quote/{symbol}")
         def stage1_quote(symbol: str, actor: Actor = Depends(current_actor)) -> dict[str, Any]:
