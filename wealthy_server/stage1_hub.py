@@ -173,16 +173,21 @@ def _classify(item,holdings):
             "confidence":"제목만 분석 · 추가 검증 필요"}
 
 def review_news(owner,portfolios,*,feed=None,now=None,notify=True):
-    feed=feed if feed is not None else news_30d(now=now)
+    if feed is None:
+        from .stage10_news_cache import reconcile_feed
+        live=news_30d(now=now)
+        feed=reconcile_feed(portfolios,owner,live,now=now)
     positions=[h["symbol"] for a in portfolios.list(owner)["accounts"] for h in a["holdings"]]
     mapped=[_classify(item,positions) for item in feed["items"]]
     related=[x for x in mapped if x["symbols"]]
     risks=[x for x in related if x["impact"]=="하방 위험 의심"]
-    if notify and risks:
+    # Never issue a fresh-risk alert for an old saved headline.
+    alertable=[x for x in risks if x.get("cache_status","fresh")=="fresh"]
+    if notify and alertable:
         stamp=(now or datetime.now(timezone.utc)).isoformat()
         with portfolios._db() as db:
             db.execute("BEGIN IMMEDIATE");inbox_schema(db)
-            for item in risks[:30]:
+            for item in alertable[:30]:
                 # Stable owner-level fingerprint on source URL & symbols; no repeat alarm.
                 import hashlib
                 eid="risk:"+hashlib.sha256((item["url"]+"|"+",".join(item["symbols"])).encode()).hexdigest()[:32]
@@ -196,7 +201,11 @@ def review_news(owner,portfolios,*,feed=None,now=None,notify=True):
              "related":len(related),"risk_suspected":len(risks),
              "not_verified":"제목 기반 의심. 뉴스가 실제 손실을 발생시킨다는 결론 아님"},
             "news":mapped[:30],"related":related[:15],
-            "risk_suspected":risks[:10],"coverage":feed.get("coverage","")}
+            "risk_suspected":risks[:10],"coverage":feed.get("coverage",""),
+            "cache_status":feed.get("cache_status","injected"),
+            "last_success_by_market":feed.get("last_success_by_market",{}),
+            "last_attempt_utc":feed.get("last_attempt_utc"),
+            "unavailable":feed.get("unavailable",[])}
 
 def _snapshot_schema(db):
     db.execute("""CREATE TABLE IF NOT EXISTS stage1_portfolio_snapshots(
