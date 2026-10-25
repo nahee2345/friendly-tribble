@@ -8,8 +8,8 @@ type Recommendation={symbol:string;name:string;region:string;kind:string;account
 type History={date:string;value_krw:string|null;contributed_krw:number;complete:boolean};
 type Hub={markets:Market[];performance:Performance;history:History[];asset_scope?:{selected:string;total_label:string;included_accounts:string[];included_scopes:string[];excluded_scopes:string[];value_field:string;complete:boolean;note:string};accounts:{id:string;name:string;krw_cash:string;usd_cash:string;holdings:number;scope?:string}[];recommendations:Recommendation[];notice:string};
 type PriceTrend={status:string;symbol:string;market:string;change_pct?:number;first_date?:string;as_of?:string;points?:{date:string;close:string}[];source?:string;reason?:string};
-type News={title:string;title_ko?:string|null;translation_status?:string;publisher?:string;editorial_lean?:string;editorial_source?:string|null;url:string;market:string;symbols:string[];impact:string;reason:string;confidence:string;published_utc:string;source:string};
-type NewsReport={status:string;summary:{checked:number;related:number;risk_suspected:number};news:News[];risk_suspected:News[];coverage:string;unavailable?:string[]};
+type News={title:string;title_ko?:string|null;translation_status?:string;publisher?:string;editorial_lean?:string;editorial_source?:string|null;url:string;market:string;symbols:string[];impact:string;reason:string;confidence:string;published_utc:string;source:string;cache_status?:'fresh'|'cached'|'stale_cache';last_success_utc?:string};
+type NewsReport={status:string;summary:{checked:number;related:number;risk_suspected:number};news:News[];risk_suspected:News[];coverage:string;unavailable?:string[];cache_status?:string;last_attempt_utc?:string;last_success_by_market?:Record<string,string>};
 type Security={market:string;symbol:string;name:string;kind:string;source:string;updated_at:string};
 type Catalog={items:Security[];total:number;is_complete:boolean;catalog_status:Record<string,{status:string;download_rows:number}>;notice:string};
 type Factor={status:'scored'|'unavailable';score:number|null;why:string[];risks:string[];metrics:Record<string,unknown>;sources:SourceEvidence[];reason?:string};
@@ -245,12 +245,13 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
         {(hub?.accounts??actualAccounts).map(a=><div className="wh-account" key={a.id}><b>{a.id==='default'?'미국 일반':a.id==='kr-base'?'한국 일반':a.id==='isa-base'?'ISA':a.name}</b><span>₩{fmt(a.krw_cash)} · ${fmt(a.usd_cash,2)}</span><small>보유 {a.holdings}종</small></div>)}
         {!hub&&actualAccounts.length===0&&<p>실제 가상계좌 데이터 확인 중</p>}</section>
       <section className="wh-card wh-news"><div className="wh-head"><b>최근 30일 뉴스·보유종목 영향</b><small>{news?.summary.checked??0}건 검토 · 관련 {news?.summary.related??0}건</small></div>
+        <p role="status" className="wh-caveat">공급원 상태: {news?.cache_status==='fresh'?'이번 조회 확인':news?.cache_status==='partial'?'일부 장애 · 지난 정상자료 혼합':news?.cache_status==='stale_cache'?'전체 장애 · 마지막 정상 캐시 표시':'확인 불가'} · 마지막 성공 KR: {news?.last_success_by_market?.KR??'없음'} / US: {news?.last_success_by_market?.US??'없음'} · 마지막 시도 {news?.last_attempt_utc??'미확인'}</p>
         <div className="wh-feed">
           <h4>해외 뉴스 · 한국어 번역</h4>
           {(news?.news??[]).filter(n=>n.market==='US').slice(0,15).map((n,i)=><div className="wh-newsrow" key={'us'+i}>
             <span className={n.impact==='하방 위험 의심'?'wh-danger':''}>{n.impact}</span>
             <a href={n.url} target="_blank" rel="noreferrer">{n.title_ko??n.title}</a>
-            <small>{n.title_ko?'자동 번역 · 원문 링크 제공':'번역 서비스 실패 · 영어 원문'} · {n.publisher??'언론사 미확인'}</small>
+            <small>{n.title_ko?'자동 번역 · 원문 링크 제공':'번역 미완료 · 영어 원문 유지'} · {n.cache_status==='stale_cache'?'과거 캐시·신규 정보 아님 · ':''}{n.publisher??'언론사 미확인'}</small>
           </div>)}
           <h4>한국 뉴스 · 언론사별</h4>
           {[...new Set((news?.news??[]).filter(n=>n.market==='KR').map(n=>n.publisher??'언론사 미확인'))].map(pub=>
@@ -258,7 +259,7 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
               <b>{pub}</b>
               {(news?.news??[]).filter(n=>n.market==='KR'&&(n.publisher??'언론사 미확인')===pub).map((n,i)=>
                 <div className="wh-newsrow" key={'kr'+i}>
-                  <span>{n.editorial_lean??'정치 성향 근거 미확인'}</span>
+                  <span>{n.editorial_lean??'정치 성향 근거 미확인'}</span>{n.cache_status==='stale_cache'&&<small>과거 정상 캐시 · 현재 공급원 장애</small>}
                   <a href={n.url} target="_blank" rel="noreferrer">{n.title}</a>
                   {n.editorial_source&&<small><a href={n.editorial_source} target="_blank" rel="noreferrer">성향 분류 연구 보기 ↗</a></small>}
                 </div>)}
