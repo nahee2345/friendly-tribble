@@ -232,7 +232,7 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
         <button className="wh-plan-trigger" onClick={()=>setShowAccounting(true)}>
           손익·환율 근거 ›
         </button></div>
-        <small>합산: PAPER 미국·한국·ISA 모의계좌만 · 수동 실제자산·SAMPLE 제외</small></div>
+        <small>합산: PAPER 미국·한국·ISA 모의계좌만 · 수동 실제자산·SAMPLE 제외</small>
         <div className="wh-total">{hub?.asset_scope?.selected!=='PAPER'?'영역 확인 필요':accounting?.valuation_complete?'₩'+fmt(accounting.market_valuation_krw):
           hub?.performance.complete?'₩'+fmt(hub.performance.portfolio_value_krw):
           actualOnlyCash!==null?'₩'+fmt(actualOnlyCash)+' (현금만)':'시세 확인 필요'}</div>
