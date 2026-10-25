@@ -1,0 +1,43 @@
+name: P0 PAPER Approval Click Candidate
+on:
+  push:
+    branches: [tech/p0-ui-approved-click-guard-20261025]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  ui-and-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+      - run: python -m pip install -e '.[web]' pytest
+      - name: Approval UI/source safety + P0 server gate regression
+        run: python -m pytest -q tests/test_p0_ui_click_contract.py tests/test_stage1_controls_cards.py tests/test_p0_turnover.py
+      - name: TypeScript and Vite bundle
+        run: |
+          npm --prefix web/frontend ci
+          npm --prefix web/frontend run build
+      - name: Report npm vulnerability paths (informational, no silent fix)
+        shell: bash
+        run: |
+          cd web/frontend
+          npm audit --json > /tmp/wealthy-audit.json || true
+          python - <<'PY'
+          import json
+          with open('/tmp/wealthy-audit.json',encoding='utf-8') as f: data=json.load(f)
+          print('VULNERABILITY COUNTS:',data.get('metadata',{}).get('vulnerabilities'))
+          for name,record in data.get('vulnerabilities',{}).items():
+              if record.get('severity') in ('high','critical'):
+                  print('PACKAGE:',name,'SEVERITY:',record.get('severity'))
+                  print('VIA:',str(record.get('via'))[:800])
+                  print('RANGE:',record.get('range'),'FIX:',record.get('fixAvailable'))
+          PY
