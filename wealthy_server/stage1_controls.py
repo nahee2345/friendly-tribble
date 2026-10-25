@@ -136,3 +136,37 @@ def decide_approval(owner,portfolios,request_id,approve):
                    ("APPROVED" if approve else "REJECTED",now_utc().isoformat(),owner,request_id))
         db.execute("COMMIT")
     return list_approvals(owner,portfolios)
+
+def approval_execution_gate(items, *, request_id, account, symbol, side,
+                            quantity, amount_krw):
+    """Read-only preflight for an existing approval request.
+
+    A rejected/expired/changed request must never become a new sub-300k
+    automatic fill just because the latest quote fell below the threshold.
+    This is NOT the atomic execution-time reservation/ledger check.
+    """
+    from decimal import Decimal, InvalidOperation
+
+    if type(quantity) is not int or quantity <= 0:
+        raise ValueError("invalid quantity")
+    try:
+        amount = Decimal(str(amount_krw))
+    except (TypeError, ValueError, InvalidOperation):
+        raise ValueError("invalid order amount") from None
+    if not amount.is_finite() or amount <= 0:
+        raise ValueError("invalid order amount")
+    existing = next((x for x in items if x["request_id"] == request_id), None)
+    if existing is None:
+        return "NEW_APPROVAL_REQUIRED" if amount >= 300000 else "NO_APPROVAL_REQUIRED"
+    if (existing["account"], existing["symbol"], existing["side"],
+            existing["quantity"]) != (account, symbol, side, quantity):
+        return "RECONCILIATION_REQUIRED"
+    if existing.get("needs_reconciliation"):
+        return "RECONCILIATION_REQUIRED"
+    if existing.get("executed"):
+        return "ALREADY_EXECUTED"
+    if existing["status"] != "APPROVED":
+        return "APPROVAL_REQUIRED"
+    if amount > Decimal(str(existing["amount_krw"])):
+        return "APPROVAL_REQUIRED"
+    return "APPROVED"
