@@ -69,7 +69,8 @@ export function ManualAssetsPanel(){
       if(result.status==='recorded'&&result.kind===marker.kind){
         localStorage.removeItem(PENDING_MANUAL_KEY);
         pending.current=null;setHeld(null);setRetryNeeded(false);
-        setHeldStatus('이전 수동자산 요청의 원장 기록을 확인했습니다. 중복 재전송 없이 복구했습니다.');
+        setHeldStatus('');
+        setMessage('이전 수동자산 요청의 원장 기록을 확인했습니다. 중복 재전송 없이 복구했습니다.');
         await refresh();
       }else{
         // Even a 404/not_found cannot prove a late HTTP request will not commit.
