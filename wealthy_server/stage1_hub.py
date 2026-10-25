@@ -173,16 +173,21 @@ def _classify(item,holdings):
             "confidence":"제목만 분석 · 추가 검증 필요"}
 
 def review_news(owner,portfolios,*,feed=None,now=None,notify=True):
-    feed=feed if feed is not None else news_30d(now=now)
+    if feed is None:
+        from .stage10_news_cache import reconcile_feed
+        live=news_30d(now=now)
+        feed=reconcile_feed(portfolios,owner,live,now=now)
     positions=[h["symbol"] for a in portfolios.list(owner)["accounts"] for h in a["holdings"]]
     mapped=[_classify(item,positions) for item in feed["items"]]
     related=[x for x in mapped if x["symbols"]]
     risks=[x for x in related if x["impact"]=="하방 위험 의심"]
-    if notify and risks:
+    # Never issue a fresh-risk alert for an old saved headline.
+    alertable=[x for x in risks if x.get("cache_status","fresh")=="fresh"]
+    if notify and alertable:
         stamp=(now or datetime.now(timezone.utc)).isoformat()
         with portfolios._db() as db:
             db.execute("BEGIN IMMEDIATE");inbox_schema(db)
-            for item in risks[:30]:
+            for item in alertable[:30]:
                 # Stable owner-level fingerprint on source URL & symbols; no repeat alarm.
                 import hashlib
                 eid="risk:"+hashlib.sha256((item["url"]+"|"+",".join(item["symbols"])).encode()).hexdigest()[:32]
@@ -196,7 +201,11 @@ def review_news(owner,portfolios,*,feed=None,now=None,notify=True):
              "related":len(related),"risk_suspected":len(risks),
              "not_verified":"제목 기반 의심. 뉴스가 실제 손실을 발생시킨다는 결론 아님"},
             "news":mapped[:30],"related":related[:15],
-            "risk_suspected":risks[:10],"coverage":feed.get("coverage","")}
+            "risk_suspected":risks[:10],"coverage":feed.get("coverage",""),
+            "cache_status":feed.get("cache_status","injected"),
+            "last_success_by_market":feed.get("last_success_by_market",{}),
+            "last_attempt_utc":feed.get("last_attempt_utc"),
+            "unavailable":feed.get("unavailable",[])}
 
 def _snapshot_schema(db):
     db.execute("""CREATE TABLE IF NOT EXISTS stage1_portfolio_snapshots(
@@ -251,9 +260,24 @@ def dashboard(owner,portfolios,ledger,prefs,*,market_provider=market_indices,
         markets=[{"name":name,"status":"unavailable","value":None,
                   "change_pct":None,"as_of":None,"source":"source unavailable"}
                  for name,_ in INDEXES]
+    # QA-003: the dashboard's valuation is PAPER ONLY. A legacy page
+    # calling this "total assets" must never suggest user-declared real
+    # holdings or the isolated sample were counted.
+    account_rows=[{"id":a["id"],"name":a["name"],"krw_cash":a["krw_cash"],
+                   "usd_cash":a["usd_cash"],"holdings":len(a["holdings"]),
+                   "scope":"PAPER"} for a in accounts]
     return {"markets":markets,"performance":p,"history":history,
-            "accounts":[{"id":a["id"],"name":a["name"],"krw_cash":a["krw_cash"],
-               "usd_cash":a["usd_cash"],"holdings":len(a["holdings"])} for a in accounts],
+            "asset_scope":{
+                "selected":"PAPER",
+                "total_label":"PAPER 모의자산",
+                "included_accounts":[a["id"] for a in account_rows],
+                "included_scopes":["PAPER"],
+                "excluded_scopes":["USER_DECLARED_REAL","SAMPLE"],
+                "value_field":"performance.portfolio_value_krw",
+                "complete":bool(p.get("complete")),
+                "note":"총자산은 선택된 PAPER 영역만의 평가입니다. 실보유 수동입력과 SAMPLE은 합산하지 않습니다."
+            },
+            "accounts":account_rows,
             "recommendations":decision["recommendations"][:8],
             "decision_constraints":decision["coverage_limitations"],
             "partial_errors":errors,

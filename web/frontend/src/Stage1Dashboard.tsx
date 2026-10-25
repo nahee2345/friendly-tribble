@@ -6,10 +6,10 @@ type Position={account:string;symbol:string;quantity:number;currency:string;pric
 type Performance={complete:boolean;contributions_krw:number;portfolio_value_krw:string|null;return_krw:string|null;return_pct:string|null;missing:{account:string;symbol:string;reason:string}[];positions:Position[]};
 type Recommendation={symbol:string;name:string;region:string;kind:string;account:string;status:string;decision:string;priority_score:number;price:string|null;currency:string;quantity_suggestion:number;holding_horizon:string;exit_review:string;why:string[];risks:string[];as_of?:string;source?:string};
 type History={date:string;value_krw:string|null;contributed_krw:number;complete:boolean};
-type Hub={markets:Market[];performance:Performance;history:History[];accounts:{id:string;name:string;krw_cash:string;usd_cash:string;holdings:number}[];recommendations:Recommendation[];notice:string};
+type Hub={markets:Market[];performance:Performance;history:History[];asset_scope?:{selected:string;total_label:string;included_accounts:string[];included_scopes:string[];excluded_scopes:string[];value_field:string;complete:boolean;note:string};accounts:{id:string;name:string;krw_cash:string;usd_cash:string;holdings:number;scope?:string}[];recommendations:Recommendation[];notice:string};
 type PriceTrend={status:string;symbol:string;market:string;change_pct?:number;first_date?:string;as_of?:string;points?:{date:string;close:string}[];source?:string;reason?:string};
-type News={title:string;title_ko?:string|null;translation_status?:string;publisher?:string;editorial_lean?:string;editorial_source?:string|null;url:string;market:string;symbols:string[];impact:string;reason:string;confidence:string;published_utc:string;source:string};
-type NewsReport={status:string;summary:{checked:number;related:number;risk_suspected:number};news:News[];risk_suspected:News[];coverage:string;unavailable?:string[]};
+type News={title:string;title_ko?:string|null;translation_status?:string;publisher?:string;editorial_lean?:string;editorial_source?:string|null;url:string;market:string;symbols:string[];impact:string;reason:string;confidence:string;published_utc:string;source:string;cache_status?:'fresh'|'cached'|'stale_cache';last_success_utc?:string};
+type NewsReport={status:string;summary:{checked:number;related:number;risk_suspected:number};news:News[];risk_suspected:News[];coverage:string;unavailable?:string[];cache_status?:string;last_attempt_utc?:string;last_success_by_market?:Record<string,string>};
 type Security={market:string;symbol:string;name:string;kind:string;source:string;updated_at:string};
 type Catalog={items:Security[];total:number;is_complete:boolean;catalog_status:Record<string,{status:string;download_rows:number}>;notice:string};
 type Factor={status:'scored'|'unavailable';score:number|null;why:string[];risks:string[];metrics:Record<string,unknown>;sources:SourceEvidence[];reason?:string};
@@ -41,7 +41,7 @@ function AssetGraph({data}:{data:History[]}){
   const lo=Math.min(...all),hi=Math.max(...all),span=Math.max(hi-lo,1);
   const xy=(i:number,v:number)=>[12+i*400/(data.length-1),85-(v-lo)*70/span];
   const line=(get:(x:History)=>number|null)=>data.map((x,i)=>{const n=get(x);return n===null?'':(i===0?'M':'L')+xy(i,n).join(',')}).filter(Boolean).join(' ');
-  return <svg viewBox="0 0 425 100" preserveAspectRatio="none" role="img" aria-label="실제 기록된 날짜 기준 내 총자산과 누적 투자원금 차트">
+  return <svg viewBox="0 0 425 100" preserveAspectRatio="none" role="img" aria-label="PAPER 모의계좌의 날짜별 평가자산과 누적 가상입금 차트">
     {[19,49,79].map(y=><path key={y} d={'M12 '+y+' H412'} stroke="currentColor" strokeOpacity=".09" strokeDasharray="4 4"/>)}
     <path d={line(x=>x.contributed_krw)} fill="none" stroke="#88959e" strokeWidth="1.9" strokeDasharray="6 4"/>
     <path d={line(x=>x.value_krw===null?null:Number(x.value_krw))} fill="none" stroke="#16a085" strokeWidth="2.5"/>
@@ -50,6 +50,7 @@ function AssetGraph({data}:{data:History[]}){
 export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
   const [tab,setTab]=useState<'home'|'search'>(['/analysis','/search'].includes(window.location.pathname)?'search':'home');
   const [hub,setHub]=useState<Hub|null>(null);
+  const [authBlocked,setAuthBlocked]=useState(false);
   const [news,setNews]=useState<NewsReport|null>(null);
   const [error,setError]=useState('');
   const [busy,setBusy]=useState(false);
@@ -88,7 +89,11 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
     // Render each panel as soon as its own API returns. Slow public news
     // feeds must never delay visible local owner cash or account data.
     const requests=[
-      read<Hub>('/api/v1/stage1/hub').then(setHub).catch(()=>setError('시장·자산 정보 조회 실패. 계좌 자료를 별도 확인하세요.')),
+      read<Hub>('/api/v1/stage1/hub').then(result=>{setHub(result);setAuthBlocked(false);}).catch(error=>{
+        setHub(null);setStage8(null);setAccounting(null);setNews(null);setQuant(null);setPlan(null);
+        if(/데이터 요청 실패: (401|403)/.test(String(error)))setAuthBlocked(true);
+        setError('인증 또는 자산 조회 실패. 금융정보를 숨겼습니다.');
+      }),
       read<NewsReport>('/api/v1/stage1/news-30d').then(setNews).catch(()=>setNews({
         status:'unavailable',summary:{checked:0,related:0,risk_suspected:0},
         news:[],risk_suspected:[],coverage:'RSS 통신 또는 서버 처리 실패',unavailable:['KR','US']
@@ -203,6 +208,10 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
     ]);
     setTrend(trendResult);setSelectedSymbolRisk(riskResult);
   }
+  if(authBlocked)return <main role="alert" className="wh-wrap">
+    <h2>인증 확인 필요</h2>
+    <p>접근이 차단되어 자산·뉴스·보고서·알림을 표시하지 않습니다. 로그인 상태를 다시 확인하세요.</p>
+  </main>;
   return <div className="wh-wrap">
     <header className="wh-header"><div><b>WEALTHY</b><small>미국·한국 자동 모의투자 · 실시간 호가 아님</small></div>
       <nav><button className={tab==='home'?'on':''} onClick={()=>setTab('home')}>통합 대시보드</button>
@@ -228,28 +237,29 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
       <section className="wh-card wh-markets"><div className="wh-head"><b>시장 현황</b><small>지연 일간 종가 · 기준일 표시</small></div><div className="wh-indexgrid">
         {(hub?.markets??[{name:'KOSPI'},{name:'KOSDAQ'},{name:'S&P 500'},{name:'NASDAQ'}]).map(m=><div className="wh-index" key={m.name}><small>{m.name}</small><strong>{'value'in m&&m.value!==null&&m.value!==undefined?fmt(m.value,2):'미확인'}</strong><span>{'change_pct'in m&&m.change_pct!==null&&m.change_pct!==undefined?(m.change_pct>0?'+':'')+m.change_pct+'%':'등락 미확인'}</span><small title={'source'in m && m.source ? m.source : '공개 시장자료 수집 대기'}>{'as_of'in m&&m.as_of?'기준일 '+m.as_of:'시세 공급원 미응답 · 인터넷 연결과 데이터 제공 상태 확인'}</small></div>)}
         </div></section>
-      <section className="wh-card wh-assets"><div className="wh-head"><b>내 총자산 흐름</b>
+      <section className="wh-card wh-assets"><div className="wh-head"><b>PAPER 모의자산 흐름</b>
         <button className="wh-plan-trigger" onClick={()=>setShowAccounting(true)}>
           손익·환율 근거 ›
         </button></div>
-        <div className="wh-total">{accounting?.valuation_complete?'₩'+fmt(accounting.market_valuation_krw):
-          hub?.performance.complete?'₩'+fmt(hub.performance.portfolio_value_krw):
-          actualOnlyCash!==null?'₩'+fmt(actualOnlyCash)+' (현금만)':'시세 확인 필요'}</div>
-        <div className="wh-kpis"><span>누적 입금 ₩{fmt(accounting?.contributions_krw??hub?.performance.contributions_krw)}</span>
-          <span>총손익(세전) {accounting?.valuation_complete?'₩'+fmt(accounting.gross_change_after_contributions_krw):
-            hub?.performance.complete?'₩'+fmt(hub.performance.return_krw):'미확정'}</span>
+        <small>{hub?.asset_scope?.note??'PAPER 미국·한국·ISA 모의계좌만 포함 · 직접 입력 실보유와 SAMPLE 제외'}</small>
+        <div className="wh-total">{hub?.asset_scope?.selected!=='PAPER'?'영역 확인 필요':
+          hub.performance.complete&&hub.performance.portfolio_value_krw!==null?'₩'+fmt(hub.performance.portfolio_value_krw):
+          actualOnlyCash!==null?'₩'+fmt(actualOnlyCash)+' (PAPER 현금만 · 총평가액 아님)':'PAPER 시세 검증 대기'}</div>
+        <div className="wh-kpis"><span>가상 누적 입금 ₩{fmt(hub?.performance.contributions_krw)}</span>
+          <span>PAPER 손익(세전) {hub?.performance.complete?'₩'+fmt(hub.performance.return_krw):'미확정'}</span>
           <span>XIRR {accounting?.xirr.status==='ok'?fmt(accounting.xirr.pct,2)+'%':'미확정'}</span></div>
-        <div className="wh-chart"><AssetGraph data={accounting?.nav_history??[]}/></div><div className="wh-legend"><span>━ 평가자산</span><span>┄ 누적 입금원금</span></div></section>
+        <div className="wh-chart"><AssetGraph data={accounting?.nav_history??[]}/></div><div className="wh-legend"><span>━ PAPER 평가자산</span><span>┄ 가상 입금원금</span></div></section>
       <section className="wh-card wh-accounts"><div className="wh-head"><b>가상계좌</b><small>미국 · 한국 · ISA</small></div>
         {(hub?.accounts??actualAccounts).map(a=><div className="wh-account" key={a.id}><b>{a.id==='default'?'미국 일반':a.id==='kr-base'?'한국 일반':a.id==='isa-base'?'ISA':a.name}</b><span>₩{fmt(a.krw_cash)} · ${fmt(a.usd_cash,2)}</span><small>보유 {a.holdings}종</small></div>)}
         {!hub&&actualAccounts.length===0&&<p>실제 가상계좌 데이터 확인 중</p>}</section>
       <section className="wh-card wh-news"><div className="wh-head"><b>최근 30일 뉴스·보유종목 영향</b><small>{news?.summary.checked??0}건 검토 · 관련 {news?.summary.related??0}건</small></div>
+        <p role="status" className="wh-caveat">공급원 상태: {news?.cache_status==='fresh'?'이번 조회 확인':news?.cache_status==='partial'?'일부 장애 · 지난 정상자료 혼합':news?.cache_status==='stale_cache'?'전체 장애 · 마지막 정상 캐시 표시':'확인 불가'} · 마지막 성공 KR: {news?.last_success_by_market?.KR??'없음'} / US: {news?.last_success_by_market?.US??'없음'} · 마지막 시도 {news?.last_attempt_utc??'미확인'}</p>
         <div className="wh-feed">
           <h4>해외 뉴스 · 한국어 번역</h4>
           {(news?.news??[]).filter(n=>n.market==='US').slice(0,15).map((n,i)=><div className="wh-newsrow" key={'us'+i}>
             <span className={n.impact==='하방 위험 의심'?'wh-danger':''}>{n.impact}</span>
             <a href={n.url} target="_blank" rel="noreferrer">{n.title_ko??n.title}</a>
-            <small>{n.title_ko?'자동 번역 · 원문 링크 제공':'번역 서비스 실패 · 영어 원문'} · {n.publisher??'언론사 미확인'}</small>
+            <small>{n.title_ko?'자동 번역 · 원문 링크 제공':'번역 미완료 · 영어 원문 유지'} · {n.cache_status==='stale_cache'?'과거 캐시·신규 정보 아님 · ':''}{n.publisher??'언론사 미확인'}</small>
           </div>)}
           <h4>한국 뉴스 · 언론사별</h4>
           {[...new Set((news?.news??[]).filter(n=>n.market==='KR').map(n=>n.publisher??'언론사 미확인'))].map(pub=>
@@ -257,7 +267,7 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
               <b>{pub}</b>
               {(news?.news??[]).filter(n=>n.market==='KR'&&(n.publisher??'언론사 미확인')===pub).map((n,i)=>
                 <div className="wh-newsrow" key={'kr'+i}>
-                  <span>{n.editorial_lean??'정치 성향 근거 미확인'}</span>
+                  <span>{n.editorial_lean??'정치 성향 근거 미확인'}</span>{n.cache_status==='stale_cache'&&<small>과거 정상 캐시 · 현재 공급원 장애</small>}
                   <a href={n.url} target="_blank" rel="noreferrer">{n.title}</a>
                   {n.editorial_source&&<small><a href={n.editorial_source} target="_blank" rel="noreferrer">성향 분류 연구 보기 ↗</a></small>}
                 </div>)}
