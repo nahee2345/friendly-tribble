@@ -157,3 +157,57 @@ def test_approval_request_key_collision_is_not_marked_filled(tmp_path: Path):
     assert collided["executed"] is False
     assert collided["needs_reconciliation"] is True
     assert list_approvals("another-owner", p)["items"] == []
+
+@pytest.mark.parametrize(
+    ("approval_status", "latest_krw", "expected_gate"),
+    [
+        ("PENDING", 299999, "APPROVAL_REQUIRED"),
+        ("REJECTED", 299999, "APPROVAL_REQUIRED"),
+        ("EXPIRED", 299999, "APPROVAL_REQUIRED"),
+        ("APPROVED", 310001, "APPROVAL_REQUIRED"),
+        ("APPROVED", 299999, "APPROVED"),
+        ("APPROVED", 310000, "APPROVED"),
+    ],
+)
+def test_approval_reuse_never_bypasses_rejection_or_ceiling(
+    approval_status, latest_krw, expected_gate,
+):
+    from wealthy_server.stage1_controls import approval_execution_gate
+
+    previous = {
+        "request_id": "approved-queue-001",
+        "account": "kr-base", "symbol": "069500", "side": "BUY",
+        "quantity": 1, "amount_krw": 310000,
+        "status": approval_status, "executed": False,
+        "needs_reconciliation": False,
+    }
+    assert approval_execution_gate(
+        [previous], request_id=previous["request_id"],
+        account="kr-base", symbol="069500", side="BUY", quantity=1,
+        amount_krw=latest_krw,
+    ) == expected_gate
+
+
+def test_approval_gate_requires_review_of_collisions_and_incomplete_data():
+    from wealthy_server.stage1_controls import approval_execution_gate
+
+    params = {
+        "request_id": "owner-key-0001", "account": "kr-base",
+        "symbol": "069500", "side": "BUY", "quantity": 1,
+    }
+    assert approval_execution_gate([], **params, amount_krw=299999) == "NO_APPROVAL_REQUIRED"
+    assert approval_execution_gate([], **params, amount_krw=300000) == "NEW_APPROVAL_REQUIRED"
+    previous = {**params, "amount_krw": 310000, "status": "APPROVED",
+                "executed": False, "needs_reconciliation": False}
+    assert approval_execution_gate([previous], **{**params, "symbol": "360750"},
+                                    amount_krw=10000) == "RECONCILIATION_REQUIRED"
+    previous["needs_reconciliation"] = True
+    assert approval_execution_gate([previous], **params,
+                                    amount_krw=10000) == "RECONCILIATION_REQUIRED"
+    previous["needs_reconciliation"] = False
+    previous["executed"] = True
+    assert approval_execution_gate([previous], **params,
+                                    amount_krw=10000) == "ALREADY_EXECUTED"
+    for invalid in ("NaN", "Infinity", "-1", "0"):
+        with pytest.raises(ValueError):
+            approval_execution_gate([], **params, amount_krw=invalid)
