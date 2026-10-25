@@ -130,3 +130,84 @@ def test_approved_paper_order_expires_after_24h(tmp_path: Path):
         db.execute("UPDATE stage1_approvals SET expires_at='2020-01-01T00:00:00+00:00' WHERE owner=? AND request_id=?",
                    ("owner",req))
     assert list_approvals("owner",p)["items"][0]["status"]=="EXPIRED"
+
+def test_approval_request_key_collision_is_not_marked_filled(tmp_path: Path):
+    """A persisted order with the same key but different symbol is a conflict."""
+    _ledger, p, _prefs, _policy = environment(tmp_path)
+    request_id = "conflicting-approved-key"
+    request_approval(
+        "owner", p, request_id=request_id, account="kr-base",
+        symbol="069500", side="BUY", quantity=1,
+        amount_krw=310000, rationale="승인 요청과 실제 기록이 일치해야 함",
+    )
+    decide_approval("owner", p, request_id, True)
+    before = list_approvals("owner", p)["items"][0]
+    assert before["executed"] is False
+    assert before["needs_reconciliation"] is False
+
+    # Simulate an independently persisted, conflicting old/legacy paper fill.
+    p.trade(
+        "owner", "kr-base", "360750", "BUY", 1, request_id,
+        {"symbol": "360750", "currency": "KRW", "price": "10000",
+         "status": "ok", "tradeable": True, "source": "offline-fixture",
+         "as_of": "2026-10-16"},
+    )
+    collided = list_approvals("owner", p)["items"][0]
+    assert collided["status"] == "APPROVED"
+    assert collided["executed"] is False
+    assert collided["needs_reconciliation"] is True
+    assert list_approvals("another-owner", p)["items"] == []
+
+@pytest.mark.parametrize(
+    ("approval_status", "latest_krw", "expected_gate"),
+    [
+        ("PENDING", 299999, "APPROVAL_REQUIRED"),
+        ("REJECTED", 299999, "APPROVAL_REQUIRED"),
+        ("EXPIRED", 299999, "APPROVAL_REQUIRED"),
+        ("APPROVED", 310001, "APPROVAL_REQUIRED"),
+        ("APPROVED", 299999, "APPROVED"),
+        ("APPROVED", 310000, "APPROVED"),
+    ],
+)
+def test_approval_reuse_never_bypasses_rejection_or_ceiling(
+    approval_status, latest_krw, expected_gate,
+):
+    from wealthy_server.stage1_controls import approval_execution_gate
+
+    previous = {
+        "request_id": "approved-queue-001",
+        "account": "kr-base", "symbol": "069500", "side": "BUY",
+        "quantity": 1, "amount_krw": 310000,
+        "status": approval_status, "executed": False,
+        "needs_reconciliation": False,
+    }
+    assert approval_execution_gate(
+        [previous], request_id=previous["request_id"],
+        account="kr-base", symbol="069500", side="BUY", quantity=1,
+        amount_krw=latest_krw,
+    ) == expected_gate
+
+
+def test_approval_gate_requires_review_of_collisions_and_incomplete_data():
+    from wealthy_server.stage1_controls import approval_execution_gate
+
+    params = {
+        "request_id": "owner-key-0001", "account": "kr-base",
+        "symbol": "069500", "side": "BUY", "quantity": 1,
+    }
+    assert approval_execution_gate([], **params, amount_krw=299999) == "NO_APPROVAL_REQUIRED"
+    assert approval_execution_gate([], **params, amount_krw=300000) == "NEW_APPROVAL_REQUIRED"
+    previous = {**params, "amount_krw": 310000, "status": "APPROVED",
+                "executed": False, "needs_reconciliation": False}
+    assert approval_execution_gate([previous], **{**params, "symbol": "360750"},
+                                    amount_krw=10000) == "RECONCILIATION_REQUIRED"
+    previous["needs_reconciliation"] = True
+    assert approval_execution_gate([previous], **params,
+                                    amount_krw=10000) == "RECONCILIATION_REQUIRED"
+    previous["needs_reconciliation"] = False
+    previous["executed"] = True
+    assert approval_execution_gate([previous], **params,
+                                    amount_krw=10000) == "ALREADY_EXECUTED"
+    for invalid in ("NaN", "Infinity", "-1", "0"):
+        with pytest.raises(ValueError):
+            approval_execution_gate([], **params, amount_krw=invalid)

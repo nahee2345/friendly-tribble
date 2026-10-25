@@ -943,38 +943,50 @@ def create_app(
         def stage1_order(body: VirtualOrderBody, actor: Actor = Depends(mutation_actor)) -> dict[str, Any]:
             require_release_ledger_integrity(actor.owner_id)
             from .stage1_quotes import verified_quote
-            from .stage1_controls import status, request_approval, list_approvals
+            from .stage1_controls import (
+                status, request_approval, list_approvals, approval_execution_gate
+            )
             if status(actor.owner_id, portfolio_store)["paused"]:
                 raise _error(409,"PAPER_PAUSED","가상거래가 중지되어 있습니다.")
             try:
                 quote=verified_quote(body.symbol)
-                from decimal import Decimal
+                from decimal import Decimal, ROUND_CEILING
                 price=Decimal(str(quote["price"]))
                 cost=price*body.quantity
                 if quote.get("currency")=="USD":
                     from .stage1_research import current_fx
                     fx=current_fx()
                     if fx.get("status")!="ok":
-                        raise _error(422,"FX_UNVERIFIED","환율을 확인할 수 없어 큰 주문을 보류합니다.")
+                        raise _error(422,"FX_UNVERIFIED","환율을 확인할 수 없어 가상 주문을 보류합니다.")
                     cost*=Decimal(str(fx["usd_krw"]))
-                if cost>=300000:
-                    pending=list_approvals(actor.owner_id,portfolio_store)["items"]
-                    match=next((x for x in pending if x["request_id"]==body.request_id
-                                and x["account"]==body.portfolio
-                                and x["symbol"]==body.symbol and x["side"]==body.side
-                                and x["quantity"]==body.quantity),None)
-                    if match is None:
-                        request_approval(actor.owner_id,portfolio_store,
-                            request_id=body.request_id,account=body.portfolio,
-                            symbol=body.symbol,side=body.side,quantity=body.quantity,
-                            amount_krw=int(cost),rationale="사용자 수동 주문: 30만원 이상 가상 거래 승인 필요")
-                        return {"status":"approval_pending","traded":False,"request_id":body.request_id}
-                    if Decimal(str(match["amount_krw"])) < cost:
-                        return {"status":"approval_required","traded":False,
-                                "reason":"현재 검증된 비용이 승인 요청 금액을 초과했습니다.",
-                                "request_id":body.request_id}
-                    if match["status"]!="APPROVED":
-                        return {"status":"approval_required","traded":False,"request_id":body.request_id}
+                if not cost.is_finite() or cost<=0:
+                    raise ValueError("unverified notional")
+                approvals=list_approvals(actor.owner_id,portfolio_store)["items"]
+                gate=approval_execution_gate(
+                    approvals,request_id=body.request_id,account=body.portfolio,
+                    symbol=body.symbol,side=body.side,quantity=body.quantity,
+                    amount_krw=cost)
+                if gate=="NEW_APPROVAL_REQUIRED":
+                    # Round UP so an approval ceiling never falls below a
+                    # fractional-KRW estimated trade amount.
+                    request_approval(actor.owner_id,portfolio_store,
+                        request_id=body.request_id,account=body.portfolio,
+                        symbol=body.symbol,side=body.side,quantity=body.quantity,
+                        amount_krw=int(cost.to_integral_value(rounding=ROUND_CEILING)),
+                        rationale="사용자 수동 주문: 30만원 이상 가상 거래 승인 필요")
+                    return {"status":"approval_pending","traded":False,
+                            "request_id":body.request_id}
+                if gate=="RECONCILIATION_REQUIRED":
+                    return {"status":"reconciliation_required","traded":False,
+                            "reason":"승인 요청과 가상 원장의 거래 정보가 달라 실행을 차단했습니다.",
+                            "request_id":body.request_id}
+                if gate=="APPROVAL_REQUIRED":
+                    return {"status":"approval_required","traded":False,
+                            "reason":"기존 요청의 거절·만료 또는 거래 조건 변경으로 새 승인이 필요합니다.",
+                            "request_id":body.request_id}
+                if gate=="ALREADY_EXECUTED":
+                    return {"status":"already_executed","traded":False,
+                            "request_id":body.request_id}
                 return portfolio_store.trade(actor.owner_id, body.portfolio, body.symbol, body.side, body.quantity, body.request_id, quote)
             except (ValueError, KeyError, ArithmeticError):
                 raise _error(400, "PAPER_ORDER_REJECTED", "시세·계좌·잔고 또는 주문 정보를 확인해 주세요.") from None

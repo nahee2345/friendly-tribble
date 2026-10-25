@@ -98,14 +98,26 @@ def list_approvals(owner,portfolios):
                           rationale,status,created_at,expires_at,decided_at
                           FROM stage1_approvals WHERE owner=?
                           ORDER BY created_at DESC LIMIT 100""",(owner,)).fetchall()
-        filled=set(db.execute("SELECT portfolio,request_id FROM virtual_orders WHERE owner=?",
-                              (owner,)).fetchall())
+        # A reused request key alone is NOT evidence that the approved order
+        # was filled. Verify the immutable account, instrument, side and size.
+        # If a key was reused for a different order, expose reconciliation
+        # rather than showing a misleading completed approval.
+        filled={
+            (account, request): (symbol, side, quantity)
+            for account, request, symbol, side, quantity in db.execute(
+                "SELECT portfolio,request_id,symbol,side,quantity "
+                "FROM virtual_orders WHERE owner=?", (owner,)
+            ).fetchall()
+        }
         db.execute("COMMIT")
     names=("request_id","account","symbol","side","quantity","amount_krw",
            "rationale","status","created_at","expires_at","decided_at")
     items=[dict(zip(names,row)) for row in rows]
     for item in items:
-        item["executed"]=(item["account"],item["request_id"]) in filled
+        match=filled.get((item["account"],item["request_id"]))
+        expected=(item["symbol"],item["side"],item["quantity"])
+        item["executed"]=(match==expected)
+        item["needs_reconciliation"]=(match is not None and match!=expected)
     return {"items":items,
             "disclaimer":"승인은 실제 주문이나 가상 체결을 실행하지 않습니다. 주문 실행 시 새 시세·잔액·위험 재검증 필요."}
 
@@ -124,3 +136,37 @@ def decide_approval(owner,portfolios,request_id,approve):
                    ("APPROVED" if approve else "REJECTED",now_utc().isoformat(),owner,request_id))
         db.execute("COMMIT")
     return list_approvals(owner,portfolios)
+
+def approval_execution_gate(items, *, request_id, account, symbol, side,
+                            quantity, amount_krw):
+    """Read-only preflight for an existing approval request.
+
+    A rejected/expired/changed request must never become a new sub-300k
+    automatic fill just because the latest quote fell below the threshold.
+    This is NOT the atomic execution-time reservation/ledger check.
+    """
+    from decimal import Decimal, InvalidOperation
+
+    if type(quantity) is not int or quantity <= 0:
+        raise ValueError("invalid quantity")
+    try:
+        amount = Decimal(str(amount_krw))
+    except (TypeError, ValueError, InvalidOperation):
+        raise ValueError("invalid order amount") from None
+    if not amount.is_finite() or amount <= 0:
+        raise ValueError("invalid order amount")
+    existing = next((x for x in items if x["request_id"] == request_id), None)
+    if existing is None:
+        return "NEW_APPROVAL_REQUIRED" if amount >= 300000 else "NO_APPROVAL_REQUIRED"
+    if (existing["account"], existing["symbol"], existing["side"],
+            existing["quantity"]) != (account, symbol, side, quantity):
+        return "RECONCILIATION_REQUIRED"
+    if existing.get("needs_reconciliation"):
+        return "RECONCILIATION_REQUIRED"
+    if existing.get("executed"):
+        return "ALREADY_EXECUTED"
+    if existing["status"] != "APPROVED":
+        return "APPROVAL_REQUIRED"
+    if amount > Decimal(str(existing["amount_krw"])):
+        return "APPROVAL_REQUIRED"
+    return "APPROVED"

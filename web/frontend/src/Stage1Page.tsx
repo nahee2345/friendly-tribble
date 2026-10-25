@@ -100,7 +100,7 @@ export function Stage1Page(){
   const [performance,setPerformance]=useState<{complete:boolean;contributions_krw:number;portfolio_value_krw:string|null;return_krw:string|null;return_pct:string|null;missing:{account:string;symbol:string;reason:string}[]}|null>(null);
   const [auto,setAuto]=useState<{enabled:boolean;last_checked_at:string|null;last_result:{status:string;reason?:string;symbol?:string;domestic?:{account:string;status:string;symbol?:string;reason?:string}[];us_stocks?:{status:string;symbol?:string;reason?:string};kr_stocks?:{status:string;symbol?:string;reason?:string};exits?:{account:string;status:string;symbol:string;side?:string}[]}}|null>(null);
   const [busy,setBusy]=useState(false);const [error,setError]=useState('');const [notice,setNotice]=useState('');
-  type Approval={request_id:string;account:string;symbol:string;side:string;quantity:number;amount_krw:number;rationale:string;status:string;expires_at:string;executed:boolean};
+  type Approval={request_id:string;account:string;symbol:string;side:string;quantity:number;amount_krw:number;rationale:string;status:string;expires_at:string;executed:boolean;needs_reconciliation?:boolean};
   const [paperControl,setPaperControl]=useState<{paused:boolean;reason:string}|null>(null);
   type InboxMessage={event_id:string;title:string;detail:string;created_at:string;read_at:string|null};
   const [inboxItems,setInboxItems]=useState<InboxMessage[]>([]);
@@ -145,7 +145,7 @@ export function Stage1Page(){
   async function executeApprovedOrder(a:Approval){await action(async()=>{
     const result=await post<{status?:string;reason?:string}>('/api/v1/stage1/order',{
       portfolio:a.account,symbol:a.symbol,side:a.side,quantity:a.quantity,request_id:a.request_id});
-    if(result.status==='approval_required'||result.status==='approval_pending')
+    if(result.status==='approval_required'||result.status==='approval_pending'||result.status==='reconciliation_required')
       throw Error(result.reason??'승인 시점보다 주문 비용이 상승했거나 추가 승인이 필요합니다.');
     await reloadControls();
   },'승인된 가상 주문을 최신 시세·잔액으로 검증해 기록했습니다.');}
@@ -234,11 +234,12 @@ export function Stage1Page(){
         <article className="s1-candidate" key={a.request_id}>
           <h3>{a.symbol} · {a.side} · {money(a.amount_krw)}원</h3>
           <p>{a.account} / {a.quantity}주 · {a.status} · 승인 만료: {a.expires_at}</p><p>{a.rationale}</p>
+          {a.needs_reconciliation&&<p role="alert">거래 기록 불일치: 승인 실행을 중단했습니다. 원장 대조가 필요합니다.</p>}
           <div className="s1-candidate-actions">
             {a.status==='PENDING'?<>
               <button className="s1-outline" disabled={busy} onClick={()=>void decideApproval(a.request_id,false)}>거절</button>
-              <button className="s1-primary" disabled={busy} onClick={()=>void decideApproval(a.request_id,true)}>승인 기록</button>
-            </>:<button className="s1-primary" disabled={busy||paperControl?.paused} onClick={()=>void executeApprovedOrder(a)}>승인된 가상 주문 실행 · 시세 재검증</button>}
+              <button className="s1-primary" disabled={busy||a.needs_reconciliation} onClick={()=>void decideApproval(a.request_id,true)}>승인 기록</button>
+            </>:<button className="s1-primary" disabled={busy||paperControl?.paused||a.needs_reconciliation}>승인된 가상 주문 실행 · 시세 재검증</button>}
           </div>
         </article>)}
             {!approvals.some(a=>(a.status==='PENDING'||a.status==='APPROVED')&&!a.executed)&&<p className="s1-empty">승인 대기 중인 주문이 없습니다.</p>}
