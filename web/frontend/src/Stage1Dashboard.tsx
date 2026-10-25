@@ -232,13 +232,12 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
         <button className="wh-plan-trigger" onClick={()=>setShowAccounting(true)}>
           손익·환율 근거 ›
         </button></div>
-        <small>합산: PAPER 미국·한국·ISA 모의계좌만 · 수동 실제자산·SAMPLE 제외</small>
-        <div className="wh-total">{hub?.asset_scope?.selected!=='PAPER'?'영역 확인 필요':accounting?.valuation_complete?'₩'+fmt(accounting.market_valuation_krw):
-          hub?.performance.complete?'₩'+fmt(hub.performance.portfolio_value_krw):
-          actualOnlyCash!==null?'₩'+fmt(actualOnlyCash)+' (현금만)':'시세 확인 필요'}</div>
-        <div className="wh-kpis"><span>가상 누적 입금 ₩{fmt(accounting?.contributions_krw??hub?.performance.contributions_krw)}</span>
-          <span>PAPER 손익(세전) {accounting?.valuation_complete?'₩'+fmt(accounting.gross_change_after_contributions_krw):
-            hub?.performance.complete?'₩'+fmt(hub.performance.return_krw):'미확정'}</span>
+        <small>{hub?.asset_scope?.note??'PAPER 미국·한국·ISA 모의계좌만 포함 · 직접 입력 실보유와 SAMPLE 제외'}</small>
+        <div className="wh-total">{hub?.asset_scope?.selected!=='PAPER'?'영역 확인 필요':
+          hub.performance.complete&&hub.performance.portfolio_value_krw!==null?'₩'+fmt(hub.performance.portfolio_value_krw):
+          actualOnlyCash!==null?'₩'+fmt(actualOnlyCash)+' (PAPER 현금만 · 총평가액 아님)':'PAPER 시세 검증 대기'}</div>
+        <div className="wh-kpis"><span>가상 누적 입금 ₩{fmt(hub?.performance.contributions_krw)}</span>
+          <span>PAPER 손익(세전) {hub?.performance.complete?'₩'+fmt(hub.performance.return_krw):'미확정'}</span>
           <span>XIRR {accounting?.xirr.status==='ok'?fmt(accounting.xirr.pct,2)+'%':'미확정'}</span></div>
         <div className="wh-chart"><AssetGraph data={accounting?.nav_history??[]}/></div><div className="wh-legend"><span>━ PAPER 평가자산</span><span>┄ 가상 입금원금</span></div></section>
       <section className="wh-card wh-accounts"><div className="wh-head"><b>가상계좌</b><small>미국 · 한국 · ISA</small></div>
