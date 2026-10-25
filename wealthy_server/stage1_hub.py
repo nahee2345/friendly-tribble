@@ -203,6 +203,7 @@ def review_news(owner,portfolios,*,feed=None,now=None,notify=True):
             "news":mapped[:30],"related":related[:15],
             "risk_suspected":risks[:10],"coverage":feed.get("coverage",""),
             "cache_status":feed.get("cache_status","injected"),
+            "market_states":feed.get("market_states",{}),
             "last_success_by_market":feed.get("last_success_by_market",{}),
             "last_attempt_utc":feed.get("last_attempt_utc"),
             "unavailable":feed.get("unavailable",[])}
