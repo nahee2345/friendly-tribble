@@ -65,11 +65,18 @@ jobs:
         run: |
           cat > /tmp/wealthy_clock_plugin.py <<'PY'
           import os
+          import itertools
+          from datetime import datetime, timedelta
           import pytest
           from freezegun import freeze_time
+          counter=itertools.count()
           @pytest.fixture(autouse=True)
           def same_clock_for_each_test():
-              with freeze_time(os.environ['QA_FIXED_CLOCK'],auto_tick_seconds=0.001):
+              # Every test starts within the same requested date but has a
+              # distinct deterministic backup timestamp. Fixed absolute
+              # timestamps duplicated the migration's backup filename.
+              start=datetime.fromisoformat(os.environ['QA_FIXED_CLOCK'].replace('Z','+00:00'))
+              with freeze_time(start+timedelta(seconds=next(counter)),auto_tick_seconds=0.001):
                   yield
           PY
       - name: Execute unchanged existing Stage4/5/6/7 tests with fixed clock
