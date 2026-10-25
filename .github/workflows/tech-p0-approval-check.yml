@@ -1,0 +1,36 @@
+name: Wealthy P0 Approval Regression
+on:
+  push:
+    branches:
+      - tech/p0-trade-safety-20261025
+  pull_request:
+    branches:
+      - stage10-offline-hardening
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  p0-approval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+      - name: Install isolated test dependencies
+        run: |
+          python -m pip install -e '.[web]' pytest
+          npm --prefix web/frontend ci
+      - name: Paper approval and ledger regression
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+        run: |
+          python -m pytest -q tests/test_stage1_controls_cards.py tests/test_stage4_portfolio.py
+      - name: Existing Stage10 offline acceptance and frontend build
+        run: bash scripts/stage10_acceptance.sh
