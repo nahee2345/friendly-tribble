@@ -1,0 +1,92 @@
+name: QA019 Manual Recovery and Time Reproduction
+on:
+  push:
+    branches: [tech/qa019-recovery-timing-20261025]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  isolated-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+      - name: Install isolated tests
+        run: |
+          python -m pip install -e '.[web]' pytest
+          npm --prefix web/frontend ci
+      - name: Owner-isolated API recovery, approval and idempotency
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+        run: |
+          python -m pytest -q tests/test_qa_p0_api_ledger.py tests/test_qa001_003_manual_scope.py tests/test_qa016_news_freshness.py tests/test_qa002_last_good_news.py tests/test_p0_ui_click_contract.py tests/test_stage1_controls_cards.py tests/test_p0_turnover.py
+      - name: Refresh and tab-close browser unit tests
+        run: npm --prefix web/frontend run test -- src/ManualAssetsPanel.qa016.test.tsx
+      - name: Frontend production build
+        run: npm --prefix web/frontend run build
+  time-reproduction:
+    name: 'Legacy clock check: ${{ matrix.ref_label }} / ${{ matrix.clock }}'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ref_label: baseline
+            ref: dc92c6021f1bbd9c71b44c4accdcf0b02c64dd22
+            clock: '2026-10-19T12:00:00Z'
+          - ref_label: baseline
+            ref: dc92c6021f1bbd9c71b44c4accdcf0b02c64dd22
+            clock: '2026-10-25T12:00:00Z'
+          - ref_label: candidate
+            ref: '${{ github.sha }}'
+            clock: '2026-10-19T12:00:00Z'
+          - ref_label: candidate
+            ref: '${{ github.sha }}'
+            clock: '2026-10-25T12:00:00Z'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install test dependencies without modifying repository
+        run: python -m pip install -e '.[web]' pytest freezegun
+      - name: Create ephemeral autouse UTC test clock
+        run: |
+          cat > /tmp/wealthy_clock_plugin.py <<'PY'
+          import os
+          import itertools
+          from datetime import datetime, timedelta
+          import pytest
+          from freezegun import freeze_time
+          counter=itertools.count()
+          @pytest.fixture(autouse=True)
+          def same_clock_for_each_test():
+              # Every test starts within the same requested date but has a
+              # distinct deterministic backup timestamp. Fixed absolute
+              # timestamps duplicated the migration's backup filename.
+              start=datetime.fromisoformat(os.environ['QA_FIXED_CLOCK'].replace('Z','+00:00'))
+              with freeze_time(start+timedelta(seconds=next(counter)),auto_tick_seconds=0.001):
+                  yield
+          PY
+      - name: Execute unchanged existing Stage4/5/6/7 tests with fixed clock
+        env:
+          PYTHONPATH: /tmp
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+          QA_FIXED_CLOCK: ${{ matrix.clock }}
+        run: |
+          python -m pytest -p wealthy_clock_plugin -q \
+            tests/test_stage4_portfolio.py \
+            tests/test_stage5_accounting.py \
+            tests/test_stage6_risk.py \
+            tests/test_stage7_release.py

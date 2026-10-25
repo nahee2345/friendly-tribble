@@ -184,3 +184,59 @@ def test_same_id_parallel_direct_ledger_commit_creates_only_one_row(local_api):
     with ThreadPoolExecutor(max_workers=3) as executor:
         list(executor.map(attempt,range(3)))
     assert len(paper.orders(owner,"kr-base")["orders"])==1
+
+
+def test_manual_request_status_is_authenticated_owner_scoped_and_read_only(local_api):
+    client,post,paper,app,root,secrets,frontend,market,quote,owner=local_api
+    funds(post,paper,owner)
+    missing=client.get("/api/v1/stage1/manual-assets/request/opaque-unknown-request-001")
+    assert missing.status_code==200
+    assert missing.json()["status"]=="not_found"
+    assert missing.json()["safe_to_resubmit"] is False
+
+    body={"account":"default","symbol":"AAPL","currency":"USD",
+          "quantity":"2","side":"BUY","unit_price":"100",
+          "request_id":"manual-test-stock-001"}
+    recorded=post("/api/v1/stage1/manual-assets",body)
+    assert recorded.status_code==200,recorded.text
+    status=client.get("/api/v1/stage1/manual-assets/request/manual-test-stock-001")
+    assert status.status_code==200
+    assert status.json()["status"]=="recorded"
+    assert status.json()["kind"]=="stock"
+    assert status.json()["safe_to_resubmit"] is False
+    assert "symbol" not in status.json() and "quantity" not in status.json()
+    from wealthy_server.stage10_manual_assets import request_status
+    assert request_status(paper,"another-owner","manual-test-stock-001")["status"]=="not_found"
+    assert len(paper.orders(owner,"default")["orders"])==0
+    retry=post("/api/v1/stage1/manual-assets",body)
+    assert retry.status_code==200,retry.text
+    assert retry.json()["status"]=="already_recorded"
+    with sqlite3.connect(paper.path) as db:
+        assert db.execute("SELECT COUNT(*) FROM stage10_manual_trade_history "
+                          "WHERE owner=? AND event_id=?",
+                          (owner,"manual-test-stock-001")).fetchone()[0]==1
+
+
+def test_manual_cash_request_status_and_key_collision_rejected(local_api):
+    client,post,paper,_app,_root,_sec,_front,_market,_quote,owner=local_api
+    funds(post,paper,owner)
+    original=post("/api/v1/stage1/manual-assets/balance",
+                  {"label":"현금","currency":"KRW","amount":"100000",
+                   "side":"DEPOSIT","request_id":"manual-recovery-cash-01"})
+    assert original.status_code==200,original.text
+    checked=client.get("/api/v1/stage1/manual-assets/request/manual-recovery-cash-01")
+    assert checked.json()["status"]=="recorded"
+    assert checked.json()["kind"]=="cash"
+    wrong_kind=post("/api/v1/stage1/manual-assets",
+                    {"account":"default","symbol":"AAPL","currency":"USD",
+                     "quantity":"1","side":"BUY",
+                     "request_id":"manual-recovery-cash-01"})
+    assert wrong_kind.status_code==400
+    assert client.get("/api/v1/stage1/manual-assets/request/manual-recovery-cash-01").json()["kind"]=="cash"
+
+
+def test_manual_request_status_does_not_accept_untrusted_ids(local_api):
+    client,*rest=local_api
+    response=client.get("/api/v1/stage1/manual-assets/request/not%3Fvalid")
+    assert response.status_code==400
+    assert "Traceback" not in response.text

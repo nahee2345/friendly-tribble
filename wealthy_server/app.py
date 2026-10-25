@@ -30,6 +30,25 @@ class VirtualOrderBody(BaseModel):
     quantity: int = Field(gt=0, le=100_000)
     request_id: str
 
+class ManualAssetBody(BaseModel):
+    account: str
+    symbol: str
+    currency: str
+    quantity: str
+    side: str
+    unit_price: str | None = None
+    trade_date: str | None = None
+    request_id: str | None = None
+
+
+class ManualBalanceBody(BaseModel):
+    label: str
+    currency: str
+    amount: str
+    side: str
+    request_id: str | None = None
+
+
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
@@ -864,23 +883,6 @@ def create_app(
             except ValueError:
                 raise _error(400, "INVALID_PORTFOLIO", "가상계좌 이름 또는 유형을 확인해 주세요.") from None
 
-        class ManualAssetBody(BaseModel):
-            account: str
-            symbol: str
-            currency: str
-            quantity: str
-            side: str
-            unit_price: str | None = None
-            trade_date: str | None = None
-            request_id: str | None = None
-
-        class ManualBalanceBody(BaseModel):
-            label: str
-            currency: str
-            amount: str
-            side: str
-            request_id: str | None = None
-
         @app.post("/api/v1/stage1/manual-assets/balance")
         def stage10_adjust_manual_balance(body: ManualBalanceBody,
                                            actor: Actor = Depends(mutation_actor)) -> dict[str, Any]:
@@ -890,6 +892,16 @@ def create_app(
                                       body.currency,body.amount,body.side,request_id=body.request_id)
             except ValueError:
                 raise _error(400,"INVALID_MANUAL_BALANCE","자산 이름·통화·금액을 확인해 주세요.") from None
+
+        @app.get("/api/v1/stage1/manual-assets/request/{request_id}")
+        def stage10_manual_request_status(request_id: str,
+                                          actor: Actor = Depends(current_actor)) -> dict[str, Any]:
+            from .stage10_manual_assets import request_status
+            try:
+                return request_status(portfolio_store, actor.owner_id, request_id)
+            except ValueError:
+                raise _error(400, "INVALID_MANUAL_REQUEST_KEY",
+                             "요청 확인 식별자를 확인해 주세요.") from None
 
         @app.get("/api/v1/stage1/manual-assets")
         def stage10_manual_assets(actor: Actor = Depends(current_actor)) -> dict[str, Any]:

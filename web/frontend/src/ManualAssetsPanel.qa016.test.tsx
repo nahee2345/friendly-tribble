@@ -8,7 +8,7 @@ function json(body:unknown,status=200) {
 function empty() {
   return {items:[],balances:[],history:[],scope:'USER_DECLARED_REAL',included_in_paper_nav:false};
 }
-afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();});
+afterEach(()=>{cleanup();localStorage.clear();vi.restoreAllMocks();vi.unstubAllGlobals();});
 
 describe('QA-016-03 manual assets idempotent UI',()=>{
   it('retries a lost stock response with the SAME key and payload',async()=>{
@@ -81,4 +81,52 @@ describe('QA-016-03 manual assets idempotent UI',()=>{
     expect(sent[0]).toEqual(sent[1]);
     expect(sent[1].amount).toEqual('100000');
   });
+
+  it('remembers only an opaque ID across reload and reconciles a committed response',async()=>{
+    let requests=0;
+    vi.stubGlobal('crypto',{randomUUID:()=> 'persisted-stock-request-01'});
+    vi.spyOn(globalThis,'fetch').mockImplementation((path,opts)=>{
+      if(opts?.method==='POST'){requests++;return Promise.reject(new Error('reply lost'));}
+      if(String(path).includes('/manual-assets/request/'))return json({
+        status:'recorded',kind:'stock',request_id:'persisted-stock-request-01',
+        recorded_at:'2026-10-25T10:00:00+00:00',safe_to_resubmit:false
+      });
+      return json(empty());
+    });
+    render(<ManualAssetsPanel/>);
+    fireEvent.click(await screen.findByRole('button',{name:'선택한 주식 내역 기록'}));
+    await screen.findByRole('button',{name:/이전 요청 동일 ID로 재시도/});
+    const stored=localStorage.getItem('wealthy:manual-unresolved:v1');
+    expect(stored).toContain('persisted-stock-request-01');
+    expect(stored).not.toContain('AAPL');
+    expect(stored).not.toContain('100000');
+    cleanup();
+    render(<ManualAssetsPanel/>);
+    await screen.findByText(/중복 재전송 없이 복구했습니다/);
+    await waitFor(()=>expect(localStorage.getItem('wealthy:manual-unresolved:v1')).toBeNull());
+    expect(requests).toBe(1);
+  });
+
+  it('after tab restart, an unfound request stays blocked and is never auto-posted',async()=>{
+    localStorage.setItem('wealthy:manual-unresolved:v1',JSON.stringify({
+      request_id:'unconfirmed-still-pending-01',kind:'cash',
+      created_at:'2026-10-25T10:00:00Z'
+    }));
+    let writes=0;
+    vi.spyOn(globalThis,'fetch').mockImplementation((path,opts)=>{
+      if(opts?.method==='POST'){writes++;return json({status:'recorded'});}
+      if(String(path).includes('/manual-assets/request/'))return json({
+        status:'not_found',kind:null,recorded_at:null,safe_to_resubmit:false
+      });
+      return json(empty());
+    });
+    render(<ManualAssetsPanel/>);
+    await screen.findByText(/최종 저장 여부가 미확정입니다/);
+    const submit=screen.getByRole('button',{name:'선택한 현금 내역 기록'});
+    expect(submit).toBeDisabled();
+    fireEvent.click(submit);
+    expect(writes).toBe(0);
+    expect(localStorage.getItem('wealthy:manual-unresolved:v1')).toContain('unconfirmed-still-pending-01');
+  });
+
 });
