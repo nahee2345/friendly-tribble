@@ -153,6 +153,11 @@ def adjust(portfolios,owner,account,symbol,currency,quantity,side,*,unit_price=N
         intended=(account,symbol,currency,side,str(delta),
                   str(price) if price is not None else None,
                   trade_day.isoformat() if trade_day is not None else None)
+        if db.execute(
+            "SELECT 1 FROM stage10_manual_balance_history "
+            "WHERE owner=? AND event_id=?", (owner,event_id)
+        ).fetchone():
+            raise ValueError('idempotency key already used by manual cash')
         if previous is not None:
             if previous!=intended:
                 raise ValueError('conflicting idempotency key')
@@ -212,6 +217,11 @@ def adjust_balance(portfolios,owner,label,currency,amount,side,*,request_id=None
             "WHERE owner=? AND event_id=?", (owner,event_id)
         ).fetchone()
         intended=(label,currency,side,str(delta))
+        if db.execute(
+            "SELECT 1 FROM stage10_manual_trade_history "
+            "WHERE owner=? AND event_id=?", (owner,event_id)
+        ).fetchone():
+            raise ValueError('idempotency key already used by manual holdings')
         if previous is not None and previous!=intended:
             raise ValueError('conflicting cash adjustment request')
         if previous is None:
