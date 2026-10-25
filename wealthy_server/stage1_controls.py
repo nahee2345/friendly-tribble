@@ -98,14 +98,26 @@ def list_approvals(owner,portfolios):
                           rationale,status,created_at,expires_at,decided_at
                           FROM stage1_approvals WHERE owner=?
                           ORDER BY created_at DESC LIMIT 100""",(owner,)).fetchall()
-        filled=set(db.execute("SELECT portfolio,request_id FROM virtual_orders WHERE owner=?",
-                              (owner,)).fetchall())
+        # A reused request key alone is NOT evidence that the approved order
+        # was filled. Verify the immutable account, instrument, side and size.
+        # If a key was reused for a different order, expose reconciliation
+        # rather than showing a misleading completed approval.
+        filled={
+            (account, request): (symbol, side, quantity)
+            for account, request, symbol, side, quantity in db.execute(
+                "SELECT portfolio,request_id,symbol,side,quantity "
+                "FROM virtual_orders WHERE owner=?", (owner,)
+            ).fetchall()
+        }
         db.execute("COMMIT")
     names=("request_id","account","symbol","side","quantity","amount_krw",
            "rationale","status","created_at","expires_at","decided_at")
     items=[dict(zip(names,row)) for row in rows]
     for item in items:
-        item["executed"]=(item["account"],item["request_id"]) in filled
+        match=filled.get((item["account"],item["request_id"]))
+        expected=(item["symbol"],item["side"],item["quantity"])
+        item["executed"]=(match==expected)
+        item["needs_reconciliation"]=(match is not None and match!=expected)
     return {"items":items,
             "disclaimer":"승인은 실제 주문이나 가상 체결을 실행하지 않습니다. 주문 실행 시 새 시세·잔액·위험 재검증 필요."}
 
