@@ -48,7 +48,7 @@ export function ManualAssetsPanel(){
     <p>본인이 신고한 실보유 기록이며 증권사 검증 전입니다. PAPER·SAMPLE·PAPER 총자산에는 포함되지 않습니다. 중복 등록과 취득단가 미확정인 자료는 실제 총자산으로 합산하지 않습니다.</p>
     <h3>주식·ETF 수량</h3>
     <div className="manual-form-grid">
-      <select aria-label="보유 주식 계좌" value={account} onChange={e=>setAccount(e.target.value)}><option value="default">미국 계좌</option><option value="kr-base">한국 계좌</option><option value="isa-base">ISA</option></select>
+      <select aria-label="보유 주식 계좌" value={account} onChange={e=>setAccount(e.target.value)}><option value="default">수동 실보유 · 미국 구분</option><option value="kr-base">수동 실보유 · 한국 구분</option><option value="isa-base">수동 실보유 · ISA 구분(적격성 미확인)</option></select>
       <input aria-label="보유 종목 코드" value={symbol} onChange={e=>setSymbol(e.target.value)} placeholder="AAPL / 005930"/>
       <select aria-label="보유 주식 통화" value={currency} onChange={e=>setCurrency(e.target.value)}><option>USD</option><option>KRW</option></select>
       <input aria-label="주식 수량" inputMode="decimal" value={quantity} onChange={e=>setQuantity(e.target.value)}/>
