@@ -50,6 +50,7 @@ function AssetGraph({data}:{data:History[]}){
 export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
   const [tab,setTab]=useState<'home'|'search'>(['/analysis','/search'].includes(window.location.pathname)?'search':'home');
   const [hub,setHub]=useState<Hub|null>(null);
+  const [authBlocked,setAuthBlocked]=useState(false);
   const [news,setNews]=useState<NewsReport|null>(null);
   const [error,setError]=useState('');
   const [busy,setBusy]=useState(false);
@@ -88,7 +89,11 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
     // Render each panel as soon as its own API returns. Slow public news
     // feeds must never delay visible local owner cash or account data.
     const requests=[
-      read<Hub>('/api/v1/stage1/hub').then(setHub).catch(()=>setError('시장·자산 정보 조회 실패. 계좌 자료를 별도 확인하세요.')),
+      read<Hub>('/api/v1/stage1/hub').then(result=>{setHub(result);setAuthBlocked(false);}).catch(error=>{
+        setHub(null);setStage8(null);setAccounting(null);setNews(null);setQuant(null);setPlan(null);
+        if(/데이터 요청 실패: (401|403)/.test(String(error)))setAuthBlocked(true);
+        setError('인증 또는 자산 조회 실패. 금융정보를 숨겼습니다.');
+      }),
       read<NewsReport>('/api/v1/stage1/news-30d').then(setNews).catch(()=>setNews({
         status:'unavailable',summary:{checked:0,related:0,risk_suspected:0},
         news:[],risk_suspected:[],coverage:'RSS 통신 또는 서버 처리 실패',unavailable:['KR','US']
@@ -203,6 +208,10 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
     ]);
     setTrend(trendResult);setSelectedSymbolRisk(riskResult);
   }
+  if(authBlocked)return <main role="alert" className="wh-wrap">
+    <h2>인증 확인 필요</h2>
+    <p>접근이 차단되어 자산·뉴스·보고서·알림을 표시하지 않습니다. 로그인 상태를 다시 확인하세요.</p>
+  </main>;
   return <div className="wh-wrap">
     <header className="wh-header"><div><b>WEALTHY</b><small>미국·한국 자동 모의투자 · 실시간 호가 아님</small></div>
       <nav><button className={tab==='home'?'on':''} onClick={()=>setTab('home')}>통합 대시보드</button>
