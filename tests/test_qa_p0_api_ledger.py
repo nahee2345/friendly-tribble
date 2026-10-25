@@ -50,6 +50,15 @@ def local_api(tmp_path,monkeypatch):
     market=tmp_path/"fixture-market.sqlite3"
     app=build_local_application(data_dir=root,market_database=market,
                                 frontend_dir=frontend,secret_store=secrets)
+    from fastapi.exceptions import RequestValidationError
+    from fastapi.responses import JSONResponse
+    # Test-only diagnostics omit body values; production response masking stays.
+    async def validation_info(request,exc):
+        return JSONResponse(status_code=422,content={"fixture_validation_errors":[
+            {"loc":list(map(str,e["loc"])),"type":e["type"]}
+            for e in exc.errors()
+        ]})
+    app.add_exception_handler(RequestValidationError,validation_info)
     client=TestClient(app,base_url="http://localhost")
     login=client.post("/api/v1/login",headers={"Origin":"http://localhost"},
                       json={"username":"qa-local","password":pwd})
