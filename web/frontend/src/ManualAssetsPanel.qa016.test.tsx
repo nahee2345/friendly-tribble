@@ -1,0 +1,84 @@
+import {cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
+import {afterEach,describe,expect,it,vi} from 'vitest';
+import {ManualAssetsPanel} from './ManualAssetsPanel';
+
+function json(body:unknown,status=200) {
+  return Promise.resolve(new Response(JSON.stringify(body),{status,headers:{'Content-Type':'application/json'}}));
+}
+function empty() {
+  return {items:[],balances:[],history:[],scope:'USER_DECLARED_REAL',included_in_paper_nav:false};
+}
+afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();});
+
+describe('QA-016-03 manual assets idempotent UI',()=>{
+  it('retries a lost stock response with the SAME key and payload',async()=>{
+    let counter=0;
+    const payloads:Record<string,unknown>[]=[];
+    vi.stubGlobal('crypto',{randomUUID:()=> 'retry-stock-unique-id'});
+    vi.spyOn(globalThis,'fetch').mockImplementation((input,options)=>{
+      if(options?.method==='POST'){
+        payloads.push(JSON.parse(String(options.body)) as Record<string,unknown>);
+        counter++;
+        if(counter===1)return Promise.reject(new Error('lost response after commit'));
+        return json({status:'already_recorded'});
+      }
+      return json(empty());
+    });
+    render(<ManualAssetsPanel/>);
+    const record=await screen.findByRole('button',{name:'선택한 주식 내역 기록'});
+    fireEvent.click(record);
+    await screen.findByRole('button',{name:/이전 요청 동일 ID로 재시도/});
+    expect(record).toBeDisabled();
+    fireEvent.click(screen.getByRole('button',{name:/이전 요청 동일 ID로 재시도/}));
+    await waitFor(()=>expect(payloads).toHaveLength(2));
+    await screen.findByText(/중복 입력은 발생하지 않았습니다/);
+    expect(payloads[0].request_id).toEqual('retry-stock-unique-id');
+    expect(payloads[1]).toEqual(payloads[0]);
+  });
+
+  it('blocks concurrent double-click before state re-render, then new explicit request can differ',async()=>{
+    const payloads:Record<string,unknown>[]=[];
+    let resolveFirst:(value:Response)=>void=()=>{};
+    let ids=0;
+    vi.stubGlobal('crypto',{randomUUID:()=> 'stable-click-'+(++ids)});
+    const pending=new Promise<Response>(resolve=>{resolveFirst=resolve;});
+    vi.spyOn(globalThis,'fetch').mockImplementation((_input,options)=>{
+      if(options?.method==='POST'){
+        payloads.push(JSON.parse(String(options.body)) as Record<string,unknown>);
+        return payloads.length===1?pending:json({status:'recorded'});
+      }
+      return json(empty());
+    });
+    render(<ManualAssetsPanel/>);
+    const record=await screen.findByRole('button',{name:'선택한 주식 내역 기록'});
+    fireEvent.click(record);
+    fireEvent.click(record);
+    expect(payloads).toHaveLength(1);
+    resolveFirst(new Response(JSON.stringify({status:'recorded'}),{status:200,headers:{'Content-Type':'application/json'}}));
+    await screen.findByText(/수동 기록 저장을 확인했습니다/);
+    fireEvent.click(record);
+    await waitFor(()=>expect(payloads).toHaveLength(2));
+    expect(payloads[0].request_id).not.toEqual(payloads[1].request_id);
+  });
+
+  it('cash retry uses original same intent, not edited balance fields',async()=>{
+    const sent:Record<string,unknown>[]=[];
+    vi.stubGlobal('crypto',{randomUUID:()=> 'retry-cash-unique-id'});
+    vi.spyOn(globalThis,'fetch').mockImplementation((input,options)=>{
+      if(options?.method==='POST'){
+        const body=JSON.parse(String(options.body)) as Record<string,unknown>;
+        sent.push(body);
+        return sent.length===1?Promise.reject(new Error('network lost')):json({status:'already_recorded'});
+      }
+      return json(empty());
+    });
+    render(<ManualAssetsPanel/>);
+    fireEvent.click(await screen.findByRole('button',{name:'선택한 현금 내역 기록'}));
+    await screen.findByRole('button',{name:/이전 요청 동일 ID로 재시도/});
+    fireEvent.change(screen.getByRole('textbox',{name:'증감할 자산 금액'}),{target:{value:'900000'}});
+    fireEvent.click(screen.getByRole('button',{name:/이전 요청 동일 ID로 재시도/}));
+    await waitFor(()=>expect(sent).toHaveLength(2));
+    expect(sent[0]).toEqual(sent[1]);
+    expect(sent[1].amount).toEqual('100000');
+  });
+});

@@ -70,11 +70,10 @@ def _safe(item, now):
 
 
 def reconcile_feed(portfolios, owner, live_feed, *, now=None, limit=30):
-    """Do not downgrade a valid last-good cache during total/partial outages.
+    """Retain last-good news without confusing a successful fetch with new news.
 
-    Only accepted rows from responding markets update the cache. Last-good
-    items are read back for unavailable markets, labelled as stale and never
-    inserted into the current successful observation set.
+    A validated response can contain *unchanged* articles. Such articles are
+    cached, never fresh, and are not inputs to new-risk notifications.
     """
     now=now or datetime.now(timezone.utc)
     if not isinstance(now,datetime) or now.tzinfo is None:
@@ -84,78 +83,126 @@ def reconcile_feed(portfolios, owner, live_feed, *, now=None, limit=30):
         raise ValueError("invalid feed structure")
     if not isinstance(owner,str) or not owner or type(limit) is not int or not 1<=limit<=100:
         raise ValueError("invalid owner or news limit")
-    raw=live_feed["items"][:500]
-    fresh={}
-    for item in raw:
-        clean=_safe(item,now)
+    available={}
+    for article in live_feed["items"][:500]:
+        clean=_safe(article,now)
         if clean:
-            fresh[(clean["market"],clean["url"])]=clean
-    unavailable=set(live_feed.get("unavailable") or []) & MARKETS
-    if live_feed.get("status")=="unavailable" and not fresh:
+            available[(clean["market"],clean["url"])]=clean
+
+    unavailable=set(live_feed.get("unavailable") or ()) & MARKETS
+    if live_feed.get("status")=="unavailable":
         unavailable=set(MARKETS)
+    # Never treat a feed claiming a market failure as a fresh successful fetch.
+    available={key:value for key,value in available.items() if key[0] not in unavailable}
+    observed={m for m,_ in available}
+    unavailable|=MARKETS-observed
     now_text=now.isoformat()
 
     with portfolios._db() as db:
         db.execute("BEGIN IMMEDIATE")
         _schema(db)
-        for (market,url),item in fresh.items():
-            db.execute("""INSERT INTO stage10_news_last_good
-                 (owner,market,url,data_json,published_utc,last_success_utc)
-                 VALUES (?,?,?,?,?,?)
-                 ON CONFLICT(owner,market,url) DO UPDATE SET
-                 data_json=excluded.data_json,
-                 published_utc=excluded.published_utc,
-                 last_success_utc=excluded.last_success_utc""",
-               (owner,market,url,json.dumps(item,ensure_ascii=False,sort_keys=True),
-                item["published_utc"],now_text))
-        for market in {m for m,_ in fresh}:
+        previous={
+            (market,url): (data_json,published,last_success)
+            for market,url,data_json,published,last_success in db.execute(
+                "SELECT market,url,data_json,published_utc,last_success_utc "
+                "FROM stage10_news_last_good WHERE owner=?", (owner,)
+            )
+        }
+        new_items=set()
+        for (market,url),item in available.items():
+            prior=previous.get((market,url))
+            changed=prior is None
+            if prior is not None:
+                try:
+                    old=json.loads(prior[0])
+                    changed=(old.get("title")!=item["title"] or
+                             old.get("published_utc")!=item["published_utc"])
+                except (ValueError,TypeError):
+                    changed=True
+            if changed:
+                new_items.add((market,url))
+                db.execute("""INSERT INTO stage10_news_last_good
+                   (owner,market,url,data_json,published_utc,last_success_utc)
+                   VALUES (?,?,?,?,?,?)
+                   ON CONFLICT(owner,market,url) DO UPDATE SET
+                   data_json=excluded.data_json,
+                   published_utc=excluded.published_utc,
+                   last_success_utc=excluded.last_success_utc""",
+                   (owner,market,url,json.dumps(item,ensure_ascii=False,sort_keys=True),
+                    item["published_utc"],now_text))
+        # A successful poll with old headlines is a successful provider fetch
+        # but not a new headline. We keep the last valid observation timestamp.
+        for market in observed:
             db.execute("""INSERT INTO stage10_news_fetch_state VALUES (?,?,?)
                  ON CONFLICT(owner,market) DO UPDATE SET
                  last_success_utc=excluded.last_success_utc""",
-                (owner,market,now_text))
+                 (owner,market,now_text))
         saved=db.execute(
             "SELECT market,url,data_json,last_success_utc FROM stage10_news_last_good "
             "WHERE owner=? ORDER BY published_utc DESC LIMIT 500", (owner,)
         ).fetchall()
-        last=db.execute(
+        successful=dict(db.execute(
             "SELECT market,last_success_utc FROM stage10_news_fetch_state "
             "WHERE owner=?", (owner,)
-        ).fetchall()
+        ))
         db.execute("COMMIT")
+
     items={}
-    for market,url,payload,last_success in saved:
+    latest_pub={}
+    for market,url,payload,last_update in saved:
         try:
-            data=json.loads(payload)
-            checked=_safe(data,now)
-        except (TypeError,ValueError,json.JSONDecodeError):
+            checked=_safe(json.loads(payload),now)
+        except (ValueError,TypeError):
             checked=None
         if checked is None:
-            # Older rows remain safely stored, not promoted as current.
             continue
-        key=market,url
-        if key in fresh:
-            data=clean=fresh[key].copy()
-            clean["cache_status"]="fresh"
-        elif market in unavailable or market not in {m for m,_ in fresh}:
-            data=clean=checked.copy()
-            clean["cache_status"]="stale_cache"
+        key=(market,url)
+        if key in new_items:
+            checked=available[key].copy()
+            article_state="fresh"
+        elif key in available:
+            article_state="cached"
         else:
-            data=clean=checked.copy()
-            clean["cache_status"]="cached"
-        clean["last_success_utc"]=last_success
-        items[key]=clean
+            article_state="stale_cache" if market in unavailable else "cached"
+        checked["cache_status"]=article_state
+        checked["last_success_utc"]=successful.get(market,last_update)
+        items[key]=checked
+        latest_pub[market]=max(latest_pub.get(market,""),checked["published_utc"])
+
+    market_states={}
+    for market in sorted(MARKETS):
+        count=sum(1 for k in new_items if k[0]==market)
+        status=("stale_cache" if market in unavailable and
+                any(k[0]==market for k in items) else
+                "unavailable" if market in unavailable else
+                "fresh" if count else "cached")
+        market_states[market]={
+            "status":status,
+            "fetch_status":"unavailable" if market in unavailable else "ok",
+            "new_articles":count,
+            "last_success_utc":successful.get(market),
+            "latest_published_utc":latest_pub.get(market),
+            "last_attempt_utc":now_text,
+        }
+    all_states={x["status"] for x in market_states.values()}
+    if all_states=={"fresh"}:
+        cache_status="fresh"
+    elif all_states=={"cached"}:
+        cache_status="cached"
+    elif all_states <= {"stale_cache","unavailable"}:
+        cache_status="stale_cache" if items else "unavailable"
+    else:
+        cache_status="partial"
     final=sorted(items.values(),key=lambda x:x["published_utc"],reverse=True)[:limit]
-    cache_status="fresh" if fresh and not unavailable else (
-        "partial" if fresh else "stale_cache" if final else "unavailable"
-    )
     return {
         "items":final,
-        "status":"partial" if cache_status in ("partial","stale_cache") else
-                 "ok" if cache_status=="fresh" else "unavailable",
+        "status":"ok" if cache_status in ("fresh","cached") else
+                 "unavailable" if cache_status=="unavailable" else "partial",
         "cache_status":cache_status,
-        "last_success_by_market":dict(last),
+        "market_states":market_states,
+        "last_success_by_market":successful,
         "last_attempt_utc":now_text,
         "unavailable":sorted(unavailable),
-        "coverage":"검증된 공개 헤드라인의 마지막 정상 캐시. 오래된 기사와 원문 번역 실패 표시.",
+        "coverage":"최신 제공원 조회와 신규 기사 갱신 여부를 구분합니다. 기존 뉴스는 새 위험 알림으로 발송하지 않습니다.",
         "tradeable":False,
     }

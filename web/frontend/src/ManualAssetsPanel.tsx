@@ -1,4 +1,4 @@
-import {useEffect,useState} from 'react';
+import {useEffect,useRef,useState} from 'react';
 import './manual-assets.css';
 
 type Stock={account:string;symbol:string;currency:string;quantity:string;scope:string;cost_basis_status:string;average_cost_native:string|null;total_cost_native:string|null;realized_pnl_native:string|null;unrealized_pnl_native:string|null;duplicate_currency_conflict:boolean;history_reconciled:boolean};
@@ -21,6 +21,11 @@ export function ManualAssetsPanel(){
   const [data,setData]=useState<Result|null>(null);
   const [message,setMessage]=useState('');
   const [busy,setBusy]=useState(false);
+  // One immutable request id per unresolved user intention, not per retry.
+  // The payload stays in memory only: never expose account details to localStorage.
+  const inflight=useRef(false);
+  const pending=useRef<{path:string;signature:string;body:Record<string,unknown>;request_id:string}|null>(null);
+  const [retryNeeded,setRetryNeeded]=useState(false);
   const [account,setAccount]=useState('default');
   const [symbol,setSymbol]=useState('AAPL');
   const [operation,setOperation]=useState('BUY');
@@ -34,11 +39,49 @@ export function ManualAssetsPanel(){
   const [amount,setAmount]=useState('100000');
   async function refresh(){try{setData(await request<Result>('/api/v1/stage1/manual-assets'));}catch{setData(null);setMessage('자산 기록 조회 실패. 인증이나 저장 상태를 확인하세요. 이전 금융정보는 숨겼습니다.');}}
   useEffect(()=>{void refresh();},[]);
-  async function change(path:string,body:unknown){
-    setBusy(true);setMessage('');
-    try{await request(path,body);await refresh();setMessage('수동 보유 기록을 수정했습니다. 모의투자 원장과 별도입니다.');}
-    catch(e){setMessage('수정 실패: '+(e instanceof Error?e.message:'입력값을 확인하세요.'));}
-    finally{setBusy(false);}
+  async function change(path:string,body:Record<string,unknown>,retry=false){
+    if(inflight.current)return;
+    const signature=JSON.stringify([path,body]);
+    if(pending.current && (!retry || pending.current.signature!==signature)){
+      setMessage('이전 요청 결과가 불확실합니다. 같은 요청 ID로 재시도한 다음 새 입력을 진행하세요.');
+      return;
+    }
+    const entry=pending.current??{
+      path,signature,body:{...body},request_id:crypto.randomUUID()
+    };
+    pending.current=entry;
+    inflight.current=true;
+    setBusy(true);setRetryNeeded(false);setMessage('');
+    try{
+      const result=await request<{status?:string}>(entry.path,{
+        ...entry.body,request_id:entry.request_id
+      });
+      if(result.status && result.status!=='recorded'&&result.status!=='already_recorded')
+        throw Error('저장 결과 확인 불가: '+result.status);
+      // Only an acknowledged write permits generating a new request ID.
+      pending.current=null;
+      await refresh();
+      setMessage(result.status==='already_recorded'
+        ?'기존 요청의 저장을 확인했습니다. 중복 입력은 발생하지 않았습니다.'
+        :'수동 기록 저장을 확인했습니다. PAPER 원장은 변경되지 않습니다.');
+    }catch(e){
+      const error=e instanceof Error?e.message:String(e);
+      if(/HTTP (400|401|403|422)(?!\\d)/.test(error)){
+        // Invalid inputs and revoked sessions must not leave retained owner data.
+        pending.current=null;
+        if(/HTTP (401|403)/.test(error))setData(null);
+        setRetryNeeded(false);
+        setMessage('요청 거절: '+error+' · 입력 또는 인증 상태를 확인하세요.');
+      }else{
+        // A timeout/5xx may have committed. Same key+same payload on retry.
+        setRetryNeeded(true);
+        setMessage('응답 유실 또는 처리 불확실. 신규 요청을 만들지 말고 동일 ID로 재시도하세요. '+error);
+      }
+    }finally{inflight.current=false;setBusy(false);}
+  }
+  function retryPending(){
+    const entry=pending.current;
+    if(entry)void change(entry.path,entry.body,true);
   }
   return <section className="card manual-assets" aria-label="사용자 직접 자산 입력">
     <details>
@@ -60,7 +103,7 @@ export function ManualAssetsPanel(){
         <option value="CORRECT_ADD">수동 정정 · 수량 증가</option>
         <option value="CORRECT_REMOVE">수동 정정 · 수량 감소</option>
       </select>
-      <button type="button" disabled={busy} onClick={()=>void change('/api/v1/stage1/manual-assets',{account,symbol,currency,quantity,unit_price:unitPrice||null,trade_date:tradeDate||null,side:operation,request_id:crypto.randomUUID()})} className="manual-action manual-action-add">선택한 주식 내역 기록</button>
+      <button type="button" disabled={busy||retryNeeded} onClick={()=>void change('/api/v1/stage1/manual-assets',{account,symbol,currency,quantity,unit_price:unitPrice||null,trade_date:tradeDate||null,side:operation})} className="manual-action manual-action-add">선택한 주식 내역 기록</button>
     </div>
     <h3>현금·예금 등 별도 자산</h3>
     <div className="manual-form-grid">
@@ -72,10 +115,13 @@ export function ManualAssetsPanel(){
         <option value="CORRECT_ADD">잔액 정정 · 증가</option>
         <option value="CORRECT_REMOVE">잔액 정정 · 감소</option>
       </select>
-      <button type="button" disabled={busy} onClick={()=>void change('/api/v1/stage1/manual-assets/balance',{label,currency:assetCurrency,amount,side:cashOperation,request_id:crypto.randomUUID()})} className="manual-action manual-action-add">선택한 현금 내역 기록</button>
+      <button type="button" disabled={busy||retryNeeded} onClick={()=>void change('/api/v1/stage1/manual-assets/balance',{label,currency:assetCurrency,amount,side:cashOperation})} className="manual-action manual-action-add">선택한 현금 내역 기록</button>
       <button type="button" onClick={()=>void refresh()}>목록 갱신</button>
     </div>
     {message&&<p role="status">{message}</p>}
+    {retryNeeded&&<button type="button" disabled={busy} onClick={retryPending}>
+      이전 요청 동일 ID로 재시도 (새 거래 아님)
+    </button>}
     <h3>저장된 주식 기록</h3>
     {(data?.items??[]).map(x=><p key={x.account+x.symbol+x.currency}>{x.account} · {x.symbol} · {x.quantity}주 ({x.currency}) · {x.cost_basis_status==='known'?'평균취득가 '+x.average_cost_native:'취득단가·손익 계산 불가'}{x.duplicate_currency_conflict?' · 통화 중복: 확인 필요':''}</p>)}
     {!data?.items.length&&<p>직접 등록된 주식이 없습니다.</p>}

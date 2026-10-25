@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import './stage1.css';
 import {Stage1Dashboard} from './Stage1Dashboard';
 
@@ -100,6 +100,8 @@ export function Stage1Page(){
   const [performance,setPerformance]=useState<{complete:boolean;contributions_krw:number;portfolio_value_krw:string|null;return_krw:string|null;return_pct:string|null;missing:{account:string;symbol:string;reason:string}[]}|null>(null);
   const [auto,setAuto]=useState<{enabled:boolean;last_checked_at:string|null;last_result:{status:string;reason?:string;symbol?:string;domestic?:{account:string;status:string;symbol?:string;reason?:string}[];us_stocks?:{status:string;symbol?:string;reason?:string};kr_stocks?:{status:string;symbol?:string;reason?:string};exits?:{account:string;status:string;symbol:string;side?:string}[]}}|null>(null);
   const [busy,setBusy]=useState(false);const [error,setError]=useState('');const [notice,setNotice]=useState('');
+  // Synchronous single-flight guard survives fast double-clicks before React renders busy.
+  const approvalExecuteLock=useRef(false);
   type Approval={request_id:string;account:string;symbol:string;side:string;quantity:number;amount_krw:number;rationale:string;status:string;expires_at:string;executed:boolean;needs_reconciliation?:boolean};
   const [paperControl,setPaperControl]=useState<{paused:boolean;reason:string}|null>(null);
   type InboxMessage={event_id:string;title:string;detail:string;created_at:string;read_at:string|null};
@@ -142,13 +144,62 @@ export function Stage1Page(){
     get<{items:Approval[]}>('/api/v1/stage1/approvals').then(r=>setApprovals(r.items)).catch(()=>{});}
   async function togglePaper(paused:boolean){await action(async()=>{setPaperControl(await post('/api/v1/stage1/trade-control',{paused,reason:paused?'사용자 긴급 중지':'사용자 가상운용 허용'}));},
     paused?'모의투자 자동 주문을 중지했습니다.':'가상 투자 검토를 허용했습니다.');}
-  async function executeApprovedOrder(a:Approval){await action(async()=>{
-    const result=await post<{status?:string;reason?:string}>('/api/v1/stage1/order',{
-      portfolio:a.account,symbol:a.symbol,side:a.side,quantity:a.quantity,request_id:a.request_id});
-    if(result.status==='approval_required'||result.status==='approval_pending'||result.status==='reconciliation_required')
-      throw Error(result.reason??'승인 시점보다 주문 비용이 상승했거나 추가 승인이 필요합니다.');
-    await reloadControls();
-  },'승인된 가상 주문을 최신 시세·잔액으로 검증해 기록했습니다.');}
+  async function executeApprovedOrder(a:Approval){
+    if(approvalExecuteLock.current)return;
+    approvalExecuteLock.current=true;
+    setBusy(true);setError('');setNotice('');
+    try{
+      if(paperControl?.paused!==false || !releaseAudit ||
+         releaseAudit.blocking_count!==0 ||
+         releaseAudit.paper_execution_permitted_by_integrity!==true)
+        throw Error('가상거래 중지 또는 원장 감사가 미확인입니다. 실행을 보류합니다.');
+      // Server-side checks are authoritative: refresh state before submitting a
+      // user-initiated PAPER order; never rely on a stale approved UI row.
+      const [control,audit,latest]=await Promise.all([
+        get<{paused:boolean;reason:string}>('/api/v1/stage1/trade-control'),
+        get<ReleaseAudit>('/api/v1/stage1/release-integrity'),
+        get<{items:Approval[]}>('/api/v1/stage1/approvals')
+      ]);
+      setPaperControl(control);setReleaseAudit(audit);setApprovals(latest.items);
+      const fresh=latest.items.find(x=>x.request_id===a.request_id);
+      if(control.paused || audit.blocking_count!==0 ||
+         audit.paper_execution_permitted_by_integrity!==true ||
+         !fresh || fresh.status!=='APPROVED' || fresh.executed ||
+         fresh.needs_reconciliation ||
+         fresh.account!==a.account || fresh.symbol!==a.symbol ||
+         fresh.side!==a.side || fresh.quantity!==a.quantity ||
+         fresh.amount_krw!==a.amount_krw ||
+         !Number.isFinite(Date.parse(fresh.expires_at)) ||
+         Date.parse(fresh.expires_at)<=Date.now())
+        throw Error('승인·만료·원장 상태가 변경되어 PAPER 주문을 차단했습니다.');
+      const result=await post<{status?:string;reason?:string;traded?:boolean}>(
+        '/api/v1/stage1/order',{
+          portfolio:a.account,symbol:a.symbol,side:a.side,
+          quantity:a.quantity,request_id:a.request_id
+        });
+      // Non-final states are NOT a successful PAPER fill, even on HTTP 200.
+      if(result.status && result.status!=='already_executed')
+        throw Error(result.reason??('PAPER 실행 미확정: '+result.status));
+      const saved=await get<{orders:{id:string;symbol:string;side:string;quantity:number}[]}>(
+        '/api/v1/stage1/portfolios/'+encodeURIComponent(a.account)+'/orders');
+      const confirmed=saved.orders.some(x=>x.id===a.request_id &&
+        x.symbol===a.symbol && x.side===a.side && x.quantity===a.quantity);
+      if(!confirmed)
+        throw Error('요청 결과 또는 원장 저장 확인이 불확실합니다. 새 요청을 만들지 말고 원장을 대조하세요.');
+      setNotice(result.status==='already_executed'
+        ?'이미 기록된 PAPER 주문입니다. 원장 대조 완료(새 체결 없음).'
+        :'PAPER 가상체결의 원장 저장을 확인했습니다. 실제 증권사 주문은 아닙니다.');
+      await reloadControls();
+      await refresh();
+    }catch(e){
+      // A failed response after POST may reflect an unknown commit outcome.
+      // Never create a new request ID automatically or claim a fill.
+      setError('가상 주문 실행 보류/결과 확인 필요: '+String(e));
+    }finally{
+      approvalExecuteLock.current=false;
+      setBusy(false);
+    }
+  }
   async function decideApproval(request_id:string,approve:boolean){await action(async()=>{const r=await post<{items:Approval[]}>('/api/v1/stage1/approvals/decide',{request_id,approve});setApprovals(r.items);},approve?'가상 주문 승인을 기록했습니다. 실제 체결은 별도 재검증 필요.':'승인 요청을 거부했습니다.');}
 
   async function refresh(){try{const f=await get<State>('/api/v1/stage1/account');get<typeof performance>('/api/v1/stage1/performance').then(x=>setPerformance(x)).catch(()=>setPerformance(null));const p=await get<{accounts:A[]}>('/api/v1/stage1/portfolios');setFund(f);setAccounts(p.accounts);setError('');}catch(e){setError(String(e));}}
@@ -239,7 +290,14 @@ export function Stage1Page(){
             {a.status==='PENDING'?<>
               <button className="s1-outline" disabled={busy} onClick={()=>void decideApproval(a.request_id,false)}>거절</button>
               <button className="s1-primary" disabled={busy||a.needs_reconciliation} onClick={()=>void decideApproval(a.request_id,true)}>승인 기록</button>
-            </>:<button className="s1-primary" disabled={busy||paperControl?.paused||a.needs_reconciliation}>승인된 가상 주문 실행 · 시세 재검증</button>}
+            </>:<button type="button" className="s1-primary"
+                disabled={busy||paperControl?.paused!==false||
+                  !releaseAudit||releaseAudit.blocking_count!==0||
+                  releaseAudit.paper_execution_permitted_by_integrity!==true||
+                  a.status!=='APPROVED'||a.executed||a.needs_reconciliation||
+                  !Number.isFinite(Date.parse(a.expires_at))||Date.parse(a.expires_at)<=Date.now()}
+                onClick={()=>void executeApprovedOrder(a)}>
+                승인된 가상 주문 실행 · 시세 재검증</button>}
           </div>
         </article>)}
             {!approvals.some(a=>(a.status==='PENDING'||a.status==='APPROVED')&&!a.executed)&&<p className="s1-empty">승인 대기 중인 주문이 없습니다.</p>}

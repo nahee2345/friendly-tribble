@@ -29,7 +29,10 @@ def item(title="AAPL reports results",url="https://news.google.com/rss/articles/
 def test_full_provider_outage_uses_last_good_and_preserves_original(tmp_path):
     p=Store(tmp_path/"news.sqlite3")
     first=reconcile_feed(p,"alice",{"status":"ok","items":[item()],"unavailable":[]},now=NOW)
-    assert first["status"]=="ok"
+    # A US-only response does not establish a healthy KR market fetch.
+    assert first["status"]=="partial"
+    assert first["market_states"]["KR"]["status"]=="unavailable"
+    assert first["market_states"]["US"]["status"]=="fresh"
     assert first["items"][0]["cache_status"]=="fresh"
     later=NOW+timedelta(hours=4)
     fail=reconcile_feed(p,"alice",{"status":"unavailable","items":[],"unavailable":["US","KR"]},now=later)
@@ -53,7 +56,10 @@ def test_partial_failure_preserves_other_market_cache_and_deduplicates_url(tmp_p
     assert partial["cache_status"]=="partial"
     assert {x["market"] for x in partial["items"]}=={"KR","US"}
     assert next(x for x in partial["items"] if x["market"]=="KR")["cache_status"]=="stale_cache"
-    assert next(x for x in partial["items"] if x["market"]=="US")["cache_status"]=="fresh"
+    # The same US article re-fetched successfully is still *not new*.
+    assert next(x for x in partial["items"] if x["market"]=="US")["cache_status"]=="cached"
+    assert partial["market_states"]["US"]["fetch_status"]=="ok"
+    assert partial["market_states"]["US"]["new_articles"]==0
 
 
 def test_unsafe_urls_and_other_owners_are_not_returned(tmp_path):
