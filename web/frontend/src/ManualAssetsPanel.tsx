@@ -17,6 +17,21 @@ async function request<T>(path:string,payload?:unknown):Promise<T>{
   if(!r.ok)throw new Error('HTTP '+r.status);
   return r.json() as Promise<T>;
 }
+const PENDING_MANUAL_KEY='wealthy:manual-unresolved:v1';
+type PendingMarker={request_id:string;kind:'stock'|'cash';created_at:string};
+function savedMarker():PendingMarker|null {
+  try{
+    const raw=localStorage.getItem(PENDING_MANUAL_KEY);
+    if(!raw)return null;
+    const value=JSON.parse(raw) as PendingMarker;
+    if(typeof value.request_id!=='string'||!/^[-_a-zA-Z0-9:]{8,100}$/.test(value.request_id)||
+       !['stock','cash'].includes(value.kind))throw Error('invalid marker');
+    return value;
+  }catch{
+    // Corrupted/missing storage must never silently authorize a fresh write.
+    return {request_id:'reconciliation-required',kind:'stock',created_at:''};
+  }
+}
 export function ManualAssetsPanel(){
   const [data,setData]=useState<Result|null>(null);
   const [message,setMessage]=useState('');
@@ -26,6 +41,9 @@ export function ManualAssetsPanel(){
   const inflight=useRef(false);
   const pending=useRef<{path:string;signature:string;body:Record<string,unknown>;request_id:string}|null>(null);
   const [retryNeeded,setRetryNeeded]=useState(false);
+  const [held,setHeld]=useState<PendingMarker|null>(()=>savedMarker());
+  const [heldStatus,setHeldStatus]=useState('');
+  const [storageFailure,setStorageFailure]=useState(false);
   const [account,setAccount]=useState('default');
   const [symbol,setSymbol]=useState('AAPL');
   const [operation,setOperation]=useState('BUY');
@@ -38,7 +56,30 @@ export function ManualAssetsPanel(){
   const [assetCurrency,setAssetCurrency]=useState('KRW');
   const [amount,setAmount]=useState('100000');
   async function refresh(){try{setData(await request<Result>('/api/v1/stage1/manual-assets'));}catch{setData(null);setMessage('자산 기록 조회 실패. 인증이나 저장 상태를 확인하세요. 이전 금융정보는 숨겼습니다.');}}
-  useEffect(()=>{void refresh();},[]);
+  useEffect(()=>{void refresh();const saved=savedMarker();if(saved)void checkSavedRequest(saved);},[]);
+  async function checkSavedRequest(marker:PendingMarker) {
+    if(marker.request_id==='reconciliation-required'){
+      setHeldStatus('이전 요청 식별자가 손상되었거나 복구 저장소가 차단됐습니다. 신규 입력은 보류합니다.');
+      return;
+    }
+    try{
+      const result=await request<{status:string;kind:string|null;recorded_at:string|null;safe_to_resubmit:boolean}>(
+        '/api/v1/stage1/manual-assets/request/'+encodeURIComponent(marker.request_id)
+      );
+      if(result.status==='recorded'&&result.kind===marker.kind){
+        localStorage.removeItem(PENDING_MANUAL_KEY);
+        pending.current=null;setHeld(null);setRetryNeeded(false);
+        setHeldStatus('이전 수동자산 요청의 원장 기록을 확인했습니다. 중복 재전송 없이 복구했습니다.');
+        await refresh();
+      }else{
+        // Even a 404/not_found cannot prove a late HTTP request will not commit.
+        setHeldStatus('이전 요청의 최종 저장 여부가 미확정입니다. 신규 입력·자동 재전송을 보류하고 원장 대조가 필요합니다.');
+      }
+    }catch{
+      setHeldStatus('요청 대조에 실패했습니다. 로그인·서버 상태를 확인하세요. 신규 입력을 보류합니다.');
+      setData(null);
+    }
+  }
   async function change(path:string,body:Record<string,unknown>,retry=false){
     if(inflight.current)return;
     const signature=JSON.stringify([path,body]);
@@ -46,9 +87,30 @@ export function ManualAssetsPanel(){
       setMessage('이전 요청 결과가 불확실합니다. 같은 요청 ID로 재시도한 다음 새 입력을 진행하세요.');
       return;
     }
+    if(held && !pending.current){
+      setMessage('브라우저 재시작 후 미확정 요청이 있습니다. 요청 대조 전 신규 입력을 차단합니다.');
+      return;
+    }
     const entry=pending.current??{
       path,signature,body:{...body},request_id:crypto.randomUUID()
     };
+    if(!pending.current){
+      try{
+        const marker:PendingMarker={
+          request_id:entry.request_id,
+          kind:path.endsWith('/balance')?'cash':'stock',
+          created_at:new Date().toISOString()
+        };
+        // Only the opaque key is persisted. Account, symbol, quantities and
+        // prices are never written to localStorage or sessionStorage.
+        localStorage.setItem(PENDING_MANUAL_KEY,JSON.stringify(marker));
+        setHeld(marker);
+      }catch{
+        setStorageFailure(true);
+        setMessage('보류 요청 복구 저장소를 사용할 수 없어 새 수동 입력을 차단합니다.');
+        return;
+      }
+    }
     pending.current=entry;
     inflight.current=true;
     setBusy(true);setRetryNeeded(false);setMessage('');
@@ -59,7 +121,15 @@ export function ManualAssetsPanel(){
       if(result.status && result.status!=='recorded'&&result.status!=='already_recorded')
         throw Error('저장 결과 확인 불가: '+result.status);
       // Only an acknowledged write permits generating a new request ID.
-      pending.current=null;
+      // Clear the durable marker only after a confirmed, successful response.
+      // If removing it fails, stay blocked rather than risk a duplicate.
+      try{
+        localStorage.removeItem(PENDING_MANUAL_KEY);
+      }catch{
+        setStorageFailure(true);
+        throw Error('복구 상태 제거 실패. 신규 입력을 차단합니다.');
+      }
+      pending.current=null;setHeld(null);setHeldStatus('');
       await refresh();
       setMessage(result.status==='already_recorded'
         ?'기존 요청의 저장을 확인했습니다. 중복 입력은 발생하지 않았습니다.'
@@ -68,8 +138,11 @@ export function ManualAssetsPanel(){
       const error=e instanceof Error?e.message:String(e);
       if(/HTTP (400|401|403|422)(?!\\d)/.test(error)){
         // Invalid inputs and revoked sessions must not leave retained owner data.
-        pending.current=null;
-        if(/HTTP (401|403)/.test(error))setData(null);
+        if(!/HTTP (401|403)/.test(error)){
+          // Definitive validation rejection: no recording occurred.
+          try{localStorage.removeItem(PENDING_MANUAL_KEY);setHeld(null);pending.current=null;}
+          catch{setStorageFailure(true);}
+        }else{setData(null);}
         setRetryNeeded(false);
         setMessage('요청 거절: '+error+' · 입력 또는 인증 상태를 확인하세요.');
       }else{
@@ -103,7 +176,7 @@ export function ManualAssetsPanel(){
         <option value="CORRECT_ADD">수동 정정 · 수량 증가</option>
         <option value="CORRECT_REMOVE">수동 정정 · 수량 감소</option>
       </select>
-      <button type="button" disabled={busy||retryNeeded} onClick={()=>void change('/api/v1/stage1/manual-assets',{account,symbol,currency,quantity,unit_price:unitPrice||null,trade_date:tradeDate||null,side:operation})} className="manual-action manual-action-add">선택한 주식 내역 기록</button>
+      <button type="button" disabled={busy||retryNeeded||!!held&&!pending.current||storageFailure} onClick={()=>void change('/api/v1/stage1/manual-assets',{account,symbol,currency,quantity,unit_price:unitPrice||null,trade_date:tradeDate||null,side:operation})} className="manual-action manual-action-add">선택한 주식 내역 기록</button>
     </div>
     <h3>현금·예금 등 별도 자산</h3>
     <div className="manual-form-grid">
@@ -115,10 +188,15 @@ export function ManualAssetsPanel(){
         <option value="CORRECT_ADD">잔액 정정 · 증가</option>
         <option value="CORRECT_REMOVE">잔액 정정 · 감소</option>
       </select>
-      <button type="button" disabled={busy||retryNeeded} onClick={()=>void change('/api/v1/stage1/manual-assets/balance',{label,currency:assetCurrency,amount,side:cashOperation})} className="manual-action manual-action-add">선택한 현금 내역 기록</button>
+      <button type="button" disabled={busy||retryNeeded||!!held&&!pending.current||storageFailure} onClick={()=>void change('/api/v1/stage1/manual-assets/balance',{label,currency:assetCurrency,amount,side:cashOperation})} className="manual-action manual-action-add">선택한 현금 내역 기록</button>
       <button type="button" onClick={()=>void refresh()}>목록 갱신</button>
     </div>
     {message&&<p role="status">{message}</p>}
+    {held&&<p role="status">미확정 수동자산 요청 대조 중 · {held.kind==='stock'?'주식':'현금'} · {heldStatus||'원장 대조 필요'}</p>}
+    {held&&<button type="button" disabled={busy} onClick={()=>void checkSavedRequest(held)}>
+      이전 요청 저장 여부 다시 확인
+    </button>}
+    {storageFailure&&<p role="alert">복구 저장소 오류. 중복 입력 방지를 위해 새 자산 기록을 차단했습니다.</p>}
     {retryNeeded&&<button type="button" disabled={busy} onClick={retryPending}>
       이전 요청 동일 ID로 재시도 (새 거래 아님)
     </button>}
