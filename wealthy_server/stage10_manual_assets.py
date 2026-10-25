@@ -245,3 +245,33 @@ def adjust_balance(portfolios,owner,label,currency,amount,side,*,request_id=None
     return {"label":label,"currency":currency,"amount":row[0] if row else "0",
             "scope":"USER_DECLARED_REAL","paper_ledger_modified":False,
             "status":"already_recorded" if previous is not None else "recorded"}
+
+
+def request_status(portfolios, owner, request_id):
+    """Read-only authenticated reconciliation of one opaque manual write key.
+
+    Absence is NOT proof an in-flight request will never commit. Response does
+    not reveal another owner's records, positions, or transaction contents.
+    """
+    if not isinstance(request_id, str) or not re.fullmatch(r"[A-Za-z0-9_:-]{8,100}", request_id):
+        raise ValueError("invalid reconciliation key")
+    with portfolios._db() as db:
+        _schema(db)
+        stock = db.execute(
+            "SELECT recorded_at FROM stage10_manual_trade_history "
+            "WHERE owner=? AND event_id=?", (owner, request_id)
+        ).fetchone()
+        cash = db.execute(
+            "SELECT recorded_at FROM stage10_manual_balance_history "
+            "WHERE owner=? AND event_id=?", (owner, request_id)
+        ).fetchone()
+    if stock and cash:
+        return {"status":"conflict","kind":None,"request_id":request_id,
+                "recorded_at":None,"safe_to_resubmit":False}
+    if stock or cash:
+        row=stock if stock else cash
+        return {"status":"recorded","kind":"stock" if stock else "cash",
+                "request_id":request_id,"recorded_at":row[0],
+                "safe_to_resubmit":False}
+    return {"status":"not_found","kind":None,"request_id":request_id,
+            "recorded_at":None,"safe_to_resubmit":False}
