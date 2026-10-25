@@ -89,7 +89,7 @@ def derive_costs(events, expected_quantities):
             "average_cost_native": format(average, "f") if average is not None else None,
             "total_cost_native": format(s["basis"], "f") if known else None,
             "realized_pnl_native": (
-                format(s["realized"], "f") if s and s["realized_known"] and consistent else None
+                format(s["realized"], "f") if s and s["realized_known"] and known else None
             ),
             "unrealized_pnl_native": None,
             "valuation_status": "requires_verified_market_price",
