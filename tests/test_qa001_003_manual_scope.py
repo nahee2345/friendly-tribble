@@ -116,3 +116,28 @@ def test_qa003_dashboard_paper_scope_excludes_manual_and_sample(tmp_path,monkeyp
     assert x["asset_scope"]["excluded_scopes"]==["USER_DECLARED_REAL","SAMPLE"]
     assert x["accounts"][0]["scope"]=="PAPER"
     assert x["performance"]["portfolio_value_krw"]=="4000000"
+
+def test_concurrent_retries_record_one_manual_event(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    store=Store(tmp_path/"simultaneous.sqlite3")
+    def perform(_):
+        return adjust(store,"alice","default","MSFT","USD",1,"BUY",
+                      unit_price="200",request_id="manual-concurrent-01")
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        rows=list(pool.map(perform,range(4)))
+    assert len([r for r in rows if r.get("status")=="already_recorded"])==3
+    current=list_assets(store,"alice")["items"][0]
+    assert current["quantity"]=="1"
+    assert current["total_cost_native"]=="200"
+    assert len(list_assets(store,"alice")["history"])==1
+
+
+def test_manual_events_cannot_modify_paper_order_table(tmp_path):
+    store=Store(tmp_path/"paper-still-untouched.sqlite3")
+    with store._db() as db:
+        db.execute("CREATE TABLE virtual_orders (id TEXT PRIMARY KEY)")
+        db.execute("INSERT INTO virtual_orders VALUES ('untouched-paper')")
+    adjust(store,"alice","default","AAPL","USD",1,"BUY",unit_price="100")
+    adjust_balance(store,"alice","예금","KRW",10000,"DEPOSIT")
+    with store._db() as db:
+        assert db.execute("SELECT id FROM virtual_orders").fetchall()==[("untouched-paper",)]
