@@ -70,6 +70,7 @@ def local_api(tmp_path,monkeypatch):
 
 
 def funds(post,paper,owner):
+    initialize_paper_accounts(owner,Stage1Ledger(paper.path),paper,today=date(2026,10,25))
     from wealthy_server.stage1_controls import set_paused
     set_paused(owner,paper,False,"QA fixture paper only")
     accounts=paper.list(owner)["accounts"]
