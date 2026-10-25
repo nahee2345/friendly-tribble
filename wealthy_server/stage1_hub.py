@@ -251,9 +251,24 @@ def dashboard(owner,portfolios,ledger,prefs,*,market_provider=market_indices,
         markets=[{"name":name,"status":"unavailable","value":None,
                   "change_pct":None,"as_of":None,"source":"source unavailable"}
                  for name,_ in INDEXES]
+    # QA-003: the dashboard's valuation is PAPER ONLY. A legacy page
+    # calling this "total assets" must never suggest user-declared real
+    # holdings or the isolated sample were counted.
+    account_rows=[{"id":a["id"],"name":a["name"],"krw_cash":a["krw_cash"],
+                   "usd_cash":a["usd_cash"],"holdings":len(a["holdings"]),
+                   "scope":"PAPER"} for a in accounts]
     return {"markets":markets,"performance":p,"history":history,
-            "accounts":[{"id":a["id"],"name":a["name"],"krw_cash":a["krw_cash"],
-               "usd_cash":a["usd_cash"],"holdings":len(a["holdings"])} for a in accounts],
+            "asset_scope":{
+                "selected":"PAPER",
+                "total_label":"PAPER 모의자산",
+                "included_accounts":[a["id"] for a in account_rows],
+                "included_scopes":["PAPER"],
+                "excluded_scopes":["USER_DECLARED_REAL","SAMPLE"],
+                "value_field":"performance.portfolio_value_krw",
+                "complete":bool(p.get("complete")),
+                "note":"총자산은 선택된 PAPER 영역만의 평가입니다. 실보유 수동입력과 SAMPLE은 합산하지 않습니다."
+            },
+            "accounts":account_rows,
             "recommendations":decision["recommendations"][:8],
             "decision_constraints":decision["coverage_limitations"],
             "partial_errors":errors,
