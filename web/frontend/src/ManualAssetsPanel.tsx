@@ -32,7 +32,7 @@ export function ManualAssetsPanel(){
   const [label,setLabel]=useState('별도 보유 현금');
   const [assetCurrency,setAssetCurrency]=useState('KRW');
   const [amount,setAmount]=useState('100000');
-  async function refresh(){try{setData(await request<Result>('/api/v1/stage1/manual-assets'));}catch{setMessage('자산 기록 조회 실패. 로그인과 서버 상태를 확인하세요.');}}
+  async function refresh(){try{setData(await request<Result>('/api/v1/stage1/manual-assets'));}catch{setData(null);setMessage('자산 기록 조회 실패. 인증이나 저장 상태를 확인하세요. 이전 금융정보는 숨겼습니다.');}}
   useEffect(()=>{void refresh();},[]);
   async function change(path:string,body:unknown){
     setBusy(true);setMessage('');
@@ -98,7 +98,7 @@ export function ManualAssetsSummary(){
   const [error,setError]=useState(false);
   useEffect(()=>{let active=true;
     void request<Result>('/api/v1/stage1/manual-assets')
-      .then(r=>{if(active)setData(r);}).catch(()=>{if(active)setError(true);});
+      .then(r=>{if(active){setData(r);setError(false);}}).catch(()=>{if(active){setData(null);setError(true);}});
     return()=>{active=false;};
   },[]);
   return <section className="card manual-summary" aria-label="직접 등록한 자산 요약">
