@@ -1,0 +1,53 @@
+name: Wealthy P0 PR18 API Ledger Follow-up
+on:
+  push:
+    branches: [tech/qa-p0-api-ledger-regression-20261025]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  isolated-api-ledger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+      - run: python -m pip install -e '.[web]' pytest
+      - name: Authenticated isolated HTTP API and SQLite order tests
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+        run: |
+          python -m pytest -q tests/test_qa_p0_api_ledger.py
+      - name: Existing P0 guards and limit calculator
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+        run: |
+          python -m pytest -q tests/test_stage1_controls_cards.py tests/test_p0_turnover.py tests/test_p0_ui_click_contract.py
+      - name: Frontend build + audit dependency investigation
+        run: |
+          npm --prefix web/frontend ci
+          npm --prefix web/frontend run build
+          cd web/frontend
+          npm ls undici jsdom || true
+          npm audit --omit=dev --audit-level=high || true
+          npm audit --audit-level=high || true
+  legacy-regression-must-remain-visible:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[web]' pytest
+      - name: Legacy unchanged acceptance suite
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+        run: bash scripts/stage7_acceptance.sh
