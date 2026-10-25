@@ -32,6 +32,7 @@ def test_unknown_acquisition_never_replaced_by_zero_or_current_price(tmp_path):
     assert row["average_cost_native"] is None
     assert row["total_cost_native"] is None
     assert row["unrealized_pnl_native"] is None
+    assert row["realized_pnl_native"] is None
     assert row["scope"]=="USER_DECLARED_REAL"
     assert list_assets(store,"alice")["verified_real_asset_total_krw"] is None
     assert list_assets(store,"bob")["items"] == []
@@ -70,7 +71,7 @@ def test_buy_sell_transfer_and_corrections_are_not_interchangeable(tmp_path):
     row=list_assets(store,"alice")["items"][0]
     assert row["quantity"]=="3"
     assert row["cost_basis_status"]=="unavailable"
-    assert row["realized_pnl_native"]=="0"
+    assert row["realized_pnl_native"] is None
     assert [x["side"] for x in list_assets(store,"alice")["history"]]==[
         "CORRECT_ADD","OUT","IN"
     ]
