@@ -83,9 +83,18 @@ def ensure_schema(db: sqlite3.Connection):
 def _locked(db):
     if not db.in_transaction:
         raise ValueError("BEGIN IMMEDIATE transaction required")
-    # SQLite does not expose transaction lock kind. Only use this component
-    # from the documented BEGIN IMMEDIATE callsites; integration QA must
-    # verify concurrent writer serialization and enforce call discipline.
+    # sqlite3.in_transaction alone accepts BEGIN DEFERRED. Force a harmless
+    # writer statement on THIS connection before reading NAV/claims so a
+    # concurrent process cannot reserve capacity between read and insert.
+    # The 0-row UPDATE still takes SQLite's writer lock (verified with a
+    # competing BEGIN IMMEDIATE); no existing session value is changed.
+    try:
+        ensure_schema(db)
+        db.execute("""UPDATE stage1_turnover_sessions
+            SET opening_nav_krw=opening_nav_krw WHERE owner=?""",
+            ("__internal_no_such_owner_writer_barrier__",))
+    except sqlite3.OperationalError as error:
+        raise ValueError("TURNOVER_SQLITE_WRITE_LOCK_UNAVAILABLE") from error
 
 
 def establish_session(db, *, owner, session_date, opening_nav_krw,
@@ -187,6 +196,11 @@ def reserve(db, *, owner, session_date, request_id, account, symbol, side,
             raise ValueError("CONFLICTING_REQUEST_ID")
         if prior[6] in CLOSED:
             raise ValueError("CLOSED_REQUEST_CANNOT_REPLAY")
+        if prior[6]=="UNKNOWN":
+            raise ValueError("UNKNOWN_RESERVATION_NEEDS_RECONCILIATION")
+        # This is only a status/reconciliation response. A fill callsite
+        # MUST require status=RESERVED for a brand-new reservation: an
+        # existing pending/claimed ID must never implicitly trigger a fill.
         return {"status":"already_reserved","request_id":request_id,
                 "state":prior[6]}
     if not verified<=stamp<end or stamp<start:
