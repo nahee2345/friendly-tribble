@@ -4,6 +4,7 @@ This is NOT an integrated Stage4/HTTP fill test. No live orders, KIS, network,
 user credentials or operational SQLite database are touched.
 """
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -369,3 +370,65 @@ def test_multi_process_sqlite_writers_cannot_exceed_cap(tmp_path):
     assert result.count("rejected")==2
     with p._db() as db:
         assert db.execute("SELECT COUNT(*) FROM stage1_turnover_claims").fetchone()[0]==2
+
+
+def test_deferred_transaction_upgrades_to_sqlite_writer_lock(tmp_path):
+    """QA finding: db.in_transaction alone must not authorize a read/write race."""
+    p=store(tmp_path)
+    first=sqlite3.connect(p.path, timeout=0.1, isolation_level=None)
+    second=sqlite3.connect(p.path, timeout=0.1, isolation_level=None)
+    try:
+        first.execute("BEGIN")  # intentionally DEFERRED rather than IMMEDIATE
+        claim(first,"deferred-upgrade-01","300000")
+        with pytest.raises(sqlite3.OperationalError,match="locked"):
+            second.execute("BEGIN IMMEDIATE")
+        first.execute("COMMIT")
+        second.execute("BEGIN IMMEDIATE")
+        assert second.execute("SELECT COUNT(*) FROM stage1_turnover_claims").fetchone()[0]==1
+        second.execute("COMMIT")
+    finally:
+        if first.in_transaction:first.execute("ROLLBACK")
+        if second.in_transaction:second.execute("ROLLBACK")
+        first.close();second.close()
+
+
+def test_unknown_reservation_cannot_be_reused_to_execute_paper_order(tmp_path):
+    """No new fill after UNKNOWN even when request_id and quote still match."""
+    p,day,quote=integrated_store(tmp_path)
+    key="qa-unknown-retry-001"
+    with p._db() as db:
+        db.execute("BEGIN IMMEDIATE")
+        reserve(db,owner=OWNER,session_date=day,request_id=key,
+                account="kr-base",symbol="069500",side="BUY",quantity=1,
+                gross_krw="200000",now_utc=datetime.now(timezone.utc).isoformat())
+        mark_unknown(db,OWNER,key,datetime.now(timezone.utc).isoformat())
+        db.execute("COMMIT")
+    with pytest.raises(ValueError,match="UNKNOWN_RESERVATION_NEEDS_RECONCILIATION"):
+        p.trade(OWNER,"kr-base","069500","BUY",1,key,quote,
+                manual_approval_krw="200000",
+                verified_turnover_session_date=day)
+    with p._db() as db:
+        assert db.execute("SELECT COUNT(*) FROM virtual_orders").fetchone()[0]==0
+        assert db.execute(
+            "SELECT state FROM stage1_turnover_claims WHERE request_id=?",(key,)
+        ).fetchone()[0]=="UNKNOWN"
+
+
+def test_prior_pending_reservation_is_not_permission_to_fill(tmp_path):
+    p,day,quote=integrated_store(tmp_path)
+    key="qa-existing-claim-001"
+    with p._db() as db:
+        db.execute("BEGIN IMMEDIATE")
+        reserve(db,owner=OWNER,session_date=day,request_id=key,
+                account="kr-base",symbol="069500",side="BUY",quantity=1,
+                gross_krw="200000",now_utc=datetime.now(timezone.utc).isoformat())
+        db.execute("COMMIT")
+    with pytest.raises(ValueError,match="RESERVATION_RECONCILIATION_REQUIRED"):
+        p.trade(OWNER,"kr-base","069500","BUY",1,key,quote,
+                manual_approval_krw="200000",
+                verified_turnover_session_date=day)
+    with p._db() as db:
+        assert db.execute("SELECT COUNT(*) FROM virtual_orders").fetchone()[0]==0
+        assert db.execute(
+            "SELECT state FROM stage1_turnover_claims WHERE request_id=?",(key,)
+        ).fetchone()[0]=="RESERVED"
