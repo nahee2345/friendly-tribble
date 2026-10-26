@@ -1,0 +1,62 @@
+name: QA23 Writer-Barrier and PAPER Stop Truthfulness
+on:
+  push:
+    branches: [tech/qa23-design-lock-hardening-20261026]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  targeted-qa:
+    name: isolated P0 writer and UI regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+      - name: Install dependencies
+        run: |
+          python -m pip install -e '.[web]' pytest
+          npm --prefix web/frontend ci
+      - name: P0 isolation including concurrent SQLite writer upgrade
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+        run: |
+          python -m pytest -q tests/test_p0_session_reservations.py \
+            tests/test_qa_p0_api_ledger.py tests/test_p0_turnover.py \
+            tests/test_stage1_controls_cards.py
+      - name: React and recovery UI regression
+        run: |
+          npm --prefix web/frontend run test -- \
+            src/paperControlDisplay.test.ts \
+            src/ManualAssetsPanel.qa016.test.tsx
+      - name: React TypeScript and Vite
+        run: npm --prefix web/frontend run build
+      - name: Backup and restart regression
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+        run: |
+          python -m pytest -q tests/test_stage1_backup.py \
+            tests/test_stage1_schema_migration.py \
+            tests/test_web_local_backup.py \
+            tests/test_stage1_paper.py::test_funding_restart_no_duplicate
+  unchanged-release:
+    name: Existing historical fixture acceptance - do not suppress failures
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[web]' pytest
+      - name: Unmodified original Stage 7/10 acceptance
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+        run: bash scripts/stage7_acceptance.sh
