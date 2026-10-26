@@ -80,3 +80,48 @@ def test_market_before_and_after_regular_hours_is_not_open():
         now=datetime(2026,10,26,19,59,59,tzinfo=timezone.utc))
     assert not verified_regular_hours_now(session_date=day,
         now=datetime(2026,10,26,20,0,tzinfo=timezone.utc))
+
+
+
+def test_calendar_checked_session_reservation_half_day_and_late_denial(tmp_path):
+    from wealthy_server.stage1_portfolios import Portfolios
+    from wealthy_server.stage1_turnover_reservations import (
+        establish_calendar_checked_session,reserve
+    )
+    paper=Portfolios(tmp_path/"only-test.sqlite3")
+    with paper._db() as db:
+        db.execute("BEGIN IMMEDIATE")
+        result=establish_calendar_checked_session(
+            db,owner="test-only",session_date="2026-11-27",
+            opening_nav_krw="4000000",
+            nav_source="2026-fixture-valuation-not-live-provider",
+            verified_utc="2026-11-27T14:30:00+00:00"
+        )
+        assert result["cap_krw"]=="800000.00"
+        assert reserve(
+            db,owner="test-only",session_date="2026-11-27",
+            request_id="core-hour-fixture-01",account="kr-base",
+            symbol="SPY",side="BUY",quantity=1,
+            gross_krw="300000",now_utc="2026-11-27T17:59:59+00:00"
+        )["status"]=="RESERVED"
+        with pytest.raises(ValueError,match="US_MARKET_SESSION_NOT_VERIFIED_OR_CLOSED"):
+            reserve(db,owner="test-only",session_date="2026-11-27",
+                request_id="post-half-day-02",account="kr-base",
+                symbol="SPY",side="BUY",quantity=1,
+                gross_krw="100000",now_utc="2026-11-27T18:00:00+00:00")
+        db.execute("COMMIT")
+
+
+def test_calendar_checked_session_refuses_official_holiday_even_if_nav_supplied(tmp_path):
+    from wealthy_server.stage1_portfolios import Portfolios
+    from wealthy_server.stage1_turnover_reservations import establish_calendar_checked_session
+    paper=Portfolios(tmp_path/"only-test.sqlite3")
+    with paper._db() as db:
+        db.execute("BEGIN IMMEDIATE")
+        with pytest.raises(ValueError,match="US_MARKET_HOLIDAY_OR_WEEKEND"):
+            establish_calendar_checked_session(
+                db,owner="test-only",session_date="2026-11-26",
+                opening_nav_krw="4000000",
+                nav_source="2026-fixture-valuation-not-live-provider",
+                verified_utc="2026-11-26T14:30:00+00:00")
+        db.execute("COMMIT")
