@@ -3,7 +3,7 @@
 This is NOT an integrated Stage4/HTTP fill test. No live orders, KIS, network,
 user credentials or operational SQLite database are touched.
 """
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -346,3 +346,26 @@ def test_session_proof_is_owner_scoped_and_cannot_be_weakened(tmp_path):
                 opening_nav_krw=NAV,nav_source="verified-historical-valuation-fixture",
                 verified_utc=STAMP,start_utc=END,end_utc=START)
         db.execute("COMMIT")
+
+def _other_process_claim(db_path: str, index: int):
+    """Top-level function: executable by a separate Python interpreter."""
+    p=Portfolios(Path(db_path))
+    with p._db() as db:
+        db.execute("BEGIN IMMEDIATE")
+        try:
+            claim(db,f"process-shared-{index:04d}","300000")
+            db.execute("COMMIT")
+            return "reserved"
+        except ValueError:
+            db.execute("ROLLBACK")
+            return "rejected"
+
+
+def test_multi_process_sqlite_writers_cannot_exceed_cap(tmp_path):
+    p=store(tmp_path)
+    with ProcessPoolExecutor(max_workers=4) as executor:
+        result=list(executor.map(_other_process_claim,[str(p.path)]*4,range(4)))
+    assert result.count("reserved")==2
+    assert result.count("rejected")==2
+    with p._db() as db:
+        assert db.execute("SELECT COUNT(*) FROM stage1_turnover_claims").fetchone()[0]==2
