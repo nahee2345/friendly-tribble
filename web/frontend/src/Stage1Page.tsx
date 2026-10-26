@@ -18,6 +18,10 @@ const newKey=()=>`stage1_${crypto.randomUUID()}`;
 function csrf(){const item=document.cookie.split(';').map(x=>x.trim()).find(x=>x.startsWith('wealthy_csrf='));return item?decodeURIComponent(item.slice('wealthy_csrf='.length)):'';}
 async function get<T>(path:string):Promise<T>{const r=await fetch(path,{credentials:'same-origin',cache:'no-store'});if(!r.ok)throw Error(`조회 실패 (${r.status})`);return r.json();}
 async function post<T>(path:string,value:unknown):Promise<T>{const r=await fetch(path,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf()},body:JSON.stringify(value)});if(!r.ok)throw Error(`요청이 거부되었습니다 (${r.status}). 입력·잔액·시세를 확인해 주세요.`);return r.json();}
+const approvalStatusKo=(status:string,executed:boolean)=>executed?'PAPER 가상체결 기록 확인':({
+  PENDING:'승인 대기', APPROVED:'승인됨 · 가상체결 전',
+  REJECTED:'승인 거절', EXPIRED:'승인 만료'
+} as Record<string,string>)[status]??'상태 확인 필요';
 const accountTypes:Record<string,string>={GENERAL_OVERSEAS:'해외주식 일반계좌',GENERAL_DOMESTIC:'국내주식 일반계좌',ISA_SIMULATED:'ISA 가상계좌'};
 export function Stage1Page(){
   const [advanced,setAdvanced]=useState(false);
@@ -284,7 +288,13 @@ export function Stage1Page(){
       {approvals.filter(a=>(a.status==='PENDING'||a.status==='APPROVED')&&!a.executed).map(a=>
         <article className="s1-candidate" key={a.request_id}>
           <h3>{a.symbol} · {a.side} · {money(a.amount_krw)}원</h3>
-          <p>{a.account} / {a.quantity}주 · {a.status} · 승인 만료: {a.expires_at}</p><p>{a.rationale}</p>
+          <p>{a.account} / {a.quantity}주 · {approvalStatusKo(a.status,a.executed)} · 요청 유효기한: {a.expires_at}</p><p>{a.rationale}</p>
+          {(paperControl?.paused!==false||!releaseAudit||releaseAudit.blocking_count!==0||
+            a.needs_reconciliation||a.status==='APPROVED'&&Date.parse(a.expires_at)<=Date.now())&&
+            <p role="status" className="s1-desc">실행 제한: {a.needs_reconciliation?'승인·원장 불일치 · 원장 대조 필요':
+              paperControl?.paused!==false?'PAPER 사용자 중지 또는 상태 미확인':
+              !releaseAudit||releaseAudit.blocking_count!==0?'원장 무결성 감사 미확인 또는 차단':
+              '요청 유효기간 만료'} · 승인 기록만으로 가상체결은 완료되지 않습니다.</p>}
           {a.needs_reconciliation&&<p role="alert">거래 기록 불일치: 승인 실행을 중단했습니다. 원장 대조가 필요합니다.</p>}
           <div className="s1-candidate-actions">
             {a.status==='PENDING'?<>

@@ -1,0 +1,64 @@
+name: Wealthy historical clock / audit comparison (no safety relaxation)
+on:
+  push:
+    branches: [tech/offline-p0-verification-20261026]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  same-clock-baseline-versus-candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: baseline
+            ref: dc92c6021f1bbd9c71b44c4accdcf0b02c64dd22
+            instant: '2026-10-19T10:00:00Z'
+          - label: candidate
+            ref: ${{ github.sha }}
+            instant: '2026-10-19T10:00:00Z'
+          - label: candidate-current-boundary
+            ref: ${{ github.sha }}
+            instant: '2026-10-25T10:00:00Z'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install unchanged acceptance requirements and isolated clock helper
+        run: python -m pip install -e '.[web]' pytest freezegun
+      - name: Create ephemeral time-only test plugin
+        run: |
+          cat >/tmp/wealthy_clock_qa.py <<'PY'
+          import os
+          from freezegun import freeze_time
+
+          _clock = None
+
+          def pytest_configure(config):
+              # Start BEFORE pytest imports the test modules. Stage5 defines
+              # START=datetime.now(UTC) during module import, not in a fixture.
+              global _clock
+              _clock=freeze_time(os.environ["QA_FIXED_CLOCK"],
+                                 auto_tick_seconds=0.001)
+              _clock.start()
+
+          def pytest_unconfigure(config):
+              global _clock
+              if _clock is not None:
+                  _clock.stop()
+                  _clock=None
+          PY
+      - name: Run same unchanged Stage4-7 acceptance files, compare failures
+        env:
+          PYTHONPATH: /tmp
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+          QA_FIXED_CLOCK: ${{ matrix.instant }}
+        run: |
+          python -m pytest -p wealthy_clock_qa -q \
+            tests/test_stage4_portfolio.py tests/test_stage5_accounting.py \
+            tests/test_stage6_risk.py tests/test_stage7_release.py

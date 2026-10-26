@@ -27,6 +27,11 @@ type Stage8Result={status:string;mode:string;local_market:{today_kst:string;week
 type Stage5Accounting={nav_history:History[];status:string;valuation_complete:boolean;market_valuation_krw:string|null;gross_change_after_contributions_krw:string|null;contributions_krw:string;gross_change_pct:string|null;reference_usd_krw:string|null;xirr:{status:string;pct:number|null;reason?:string};twr:{status:string;pct:number|null;reason?:string};native_gross_pnl:Record<string,{realized:string;unrealized:string}>;positions:{account:string;symbol:string;currency:string;unrealized_native:string;fx_effect_krw:string|null;market_price_effect_krw:string|null;fx_split_status:string;price_as_of:string;price_source_url:string}[];potential_dividends:{symbol:string;ex_date:string;potential_gross:string;currency:string;source_url:string}[];fee_analysis:{illustrative_trade_fees_krw:string|null;actual_fee_amount_complete:boolean};tax_illustrations:{status:string;domestic_isa?:{included_symbols:string[];taxable_gain_proxy_krw:string;general_scenario_tax_krw:string;isa_scenario_tax_krw:string;potential_isa_saving_krw:string}|null;warning?:string};missing:string[];warnings:string[]};
 
 
+const newsStateKo=(state:string|null|undefined):string=>({
+  fresh:'신규 기사 확인',cached:'조회 정상·신규 기사 없음',
+  stale_cache:'공급원 장애·이전 자료',unavailable:'수집 불가·자료 없음',
+  partial:'일부 장애 또는 신규·기존 자료 혼합'
+} as Record<string,string>)[state??'']??'상태 확인 필요';
 const strategyLabels:Record<string,string>={index:'장기지수',value:'가치',quality_growth:'우량성장',growth:'성장',high_dividend:'고배당',dividend_growth:'배당성장',momentum:'모멘텀',asset_allocation:'자산배분'};
 type ReferenceHealth={current_references:Record<string,number>;recent_attempts:{kind:string;symbol:string;provider:string;checked_utc:string;status:string;error_code:string|null;retry_after_utc:string}[];paper_order_eligible:boolean;notice:string;sec_contact_configured:boolean};
 const fmt=(x:string|number|null|undefined,d=0)=>x===null||x===undefined?'자료 없음':Number(x).toLocaleString('ko-KR',{maximumFractionDigits:d});
@@ -253,7 +258,7 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
         {(hub?.accounts??actualAccounts).map(a=><div className="wh-account" key={a.id}><b>{a.id==='default'?'미국 일반':a.id==='kr-base'?'한국 일반':a.id==='isa-base'?'ISA':a.name}</b><span>₩{fmt(a.krw_cash)} · ${fmt(a.usd_cash,2)}</span><small>보유 {a.holdings}종</small></div>)}
         {!hub&&actualAccounts.length===0&&<p>실제 가상계좌 데이터 확인 중</p>}</section>
       <section className="wh-card wh-news"><div className="wh-head"><b>최근 30일 뉴스·보유종목 영향</b><small>{news?.summary.checked??0}건 검토 · 관련 {news?.summary.related??0}건</small></div>
-        <p role="status" className="wh-caveat">공급원 상태: {news?.cache_status==='fresh'?'이번 조회 확인':news?.cache_status==='partial'?'시장별 신규·기존 기사 혼합 또는 부분 장애':news?.cache_status==='cached'?'공급원 조회 정상 · 신규 기사 없음':news?.cache_status==='stale_cache'?'전체 장애 · 마지막 정상 캐시 표시':'확인 불가'} · 마지막 성공 KR: {news?.last_success_by_market?.KR??'없음'} / US: {news?.last_success_by_market?.US??'없음'} · 마지막 시도 {news?.last_attempt_utc??'미확인'} · KR: {news?.market_states?.KR?.status??'확인 불가'} / US: {news?.market_states?.US?.status??'확인 불가'}</p>
+        <p role="status" className="wh-caveat">공급원 상태: {news?.cache_status==='fresh'?'이번 조회 확인':news?.cache_status==='partial'?'시장별 신규·기존 기사 혼합 또는 부분 장애':news?.cache_status==='cached'?'공급원 조회 정상 · 신규 기사 없음':news?.cache_status==='stale_cache'?'전체 장애 · 마지막 정상 캐시 표시':'확인 불가'} · 마지막 성공 KR: {news?.last_success_by_market?.KR??'없음'} / US: {news?.last_success_by_market?.US??'없음'} · 마지막 시도 {news?.last_attempt_utc??'미확인'} · KR: {newsStateKo(news?.market_states?.KR?.status)} / US: {newsStateKo(news?.market_states?.US?.status)}</p>
         <div className="wh-feed">
           <h4>해외 뉴스 · 한국어 번역</h4>
           {(news?.news??[]).filter(n=>n.market==='US').slice(0,15).map((n,i)=><div className="wh-newsrow" key={'us'+i}>

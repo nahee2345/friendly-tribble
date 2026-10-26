@@ -173,7 +173,8 @@ class Portfolios:
             rows=db.execute('SELECT request_id,symbol,side,quantity,price,currency,source,as_of,created_at FROM virtual_orders WHERE owner=? AND portfolio=? ORDER BY created_at DESC,request_id DESC LIMIT ?',(owner,portfolio,limit)).fetchall()
         return {'orders':[dict(zip(('id','symbol','side','quantity','price','currency','source','as_of','timestamp'),r)) for r in rows]}
 
-    def trade(self,owner,portfolio,symbol,side,quantity,request_id,quote):
+    def trade(self,owner,portfolio,symbol,side,quantity,request_id,quote, *,
+              manual_approval_krw=None, manual_fx_krw_per_usd=None):
         if not isinstance(symbol,str) or not SYMBOL.fullmatch(symbol) or side not in ('BUY','SELL') or not isinstance(quantity,int) or isinstance(quantity,bool) or not 1<=quantity<=100000 or not valid_key(request_id):raise ValueError('주문 입력 오류')
         currency=quote['currency'];price=Decimal(quote['price'])
         if currency not in ('USD','KRW') or not price.is_finite() or price<=0 or price.as_tuple().exponent < -4: raise ValueError('가격 검증 오류')
@@ -194,6 +195,42 @@ class Portfolios:
             if prior:
                 if prior!=(symbol,side,quantity,format(price,'f'),currency): raise ValueError('요청 충돌')
             else:
+                if manual_approval_krw is not None:
+                    # HTTP approval preflight is a UX optimization, not a
+                    # security boundary. Lock the SQLite writer and re-check
+                    # approval+expiry+amount before the immutable fill insert.
+                    from .stage1_controls import schema as approval_schema
+                    approval_schema(db)
+                    supplied=Decimal(str(manual_approval_krw))
+                    if not supplied.is_finite() or supplied<=0:
+                        raise ValueError('승인 금액 검증 오류')
+                    if currency=='USD':
+                        if manual_fx_krw_per_usd is None:
+                            raise ValueError('환율 누락')
+                        fx=Decimal(str(manual_fx_krw_per_usd))
+                        if not fx.is_finite() or not Decimal('100')<=fx<=Decimal('10000'):
+                            raise ValueError('환율 검증 오류')
+                        expected=price*quantity*fx
+                    else:
+                        if manual_fx_krw_per_usd is not None:
+                            raise ValueError('원화 주문의 불필요한 환율')
+                        expected=price*quantity
+                    if supplied!=expected:
+                        raise ValueError('승인 금액과 주문 시세 불일치')
+                    approval=db.execute(
+                        'SELECT account,symbol,side,quantity,amount_krw,status,expires_at '
+                        'FROM stage1_approvals WHERE owner=? AND request_id=?',
+                        (owner,request_id)
+                    ).fetchone()
+                    if approval is not None:
+                        from .stage1_controls import now_utc
+                        if (approval[:4]!=(portfolio,symbol,side,quantity) or
+                            approval[5]!='APPROVED' or
+                            approval[6]<=now_utc().isoformat() or
+                            supplied>Decimal(approval[4])):
+                            raise ValueError('승인 요청 불일치 또는 만료')
+                    elif supplied>=Decimal('300000'):
+                        raise ValueError('30만원 이상 승인 필요')
                 krw,usd,holdings,_=self._money(db,owner,portfolio)
                 if side=='BUY' and (usd if currency=='USD' else krw)<price*quantity: raise ValueError('현금 부족')
                 if side=='SELL' and holdings.get(symbol,0)<quantity: raise ValueError('보유수량 부족')

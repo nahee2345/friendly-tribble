@@ -240,3 +240,68 @@ def test_manual_request_status_does_not_accept_untrusted_ids(local_api):
     response=client.get("/api/v1/stage1/manual-assets/request/not%3Fvalid")
     assert response.status_code==400
     assert "Traceback" not in response.text
+
+
+def test_manual_fill_transaction_rejects_approval_revoked_after_http_preflight(local_api):
+    client,post,paper,_app,_root,_sec,_front,_market,quote,owner=local_api
+    funds(post,paper,owner)
+    key="qa-race-approval-revoked"
+    assert approval_order(post,key).json()["status"]=="approval_pending"
+    assert post("/api/v1/stage1/approvals/decide",
+                {"request_id":key,"approve":True}).status_code==200
+    # This simulates approval state changing AFTER a prior HTTP preflight,
+    # before the actual BEGIN IMMEDIATE fill insert.
+    with sqlite3.connect(paper.path) as db:
+        db.execute("UPDATE stage1_approvals SET status='EXPIRED' "
+                   "WHERE owner=? AND request_id=?",(owner,key))
+        db.commit()
+    with pytest.raises(ValueError,match="승인 요청 불일치 또는 만료"):
+        paper.trade(owner,"kr-base","069500","BUY",1,key,quote,
+                    manual_approval_krw="310000")
+    assert paper.orders(owner,"kr-base")["orders"]==[]
+
+
+def test_manual_fill_transaction_rejects_missing_and_mismatched_approvals(local_api):
+    _client,post,paper,_app,_root,_sec,_front,_market,quote,owner=local_api
+    funds(post,paper,owner)
+    with pytest.raises(ValueError,match="30만원 이상 승인 필요"):
+        paper.trade(owner,"kr-base","069500","BUY",1,"manual-no-approval-001",quote,
+                    manual_approval_krw="310000")
+    assert approval_order(post,"qa-bound-approval-01").json()["status"]=="approval_pending"
+    assert post("/api/v1/stage1/approvals/decide",{
+        "request_id":"qa-bound-approval-01","approve":True}).status_code==200
+    with pytest.raises(ValueError,match="승인 금액과 주문 시세 불일치"):
+        paper.trade(owner,"kr-base","069500","BUY",1,"qa-bound-approval-01",quote,
+                    manual_approval_krw="309999")
+    with pytest.raises(ValueError,match="승인 요청 불일치 또는 만료"):
+        paper.trade(owner,"kr-base","069500","BUY",2,"qa-bound-approval-01",quote,
+                    manual_approval_krw="620000")
+    assert paper.orders(owner,"kr-base")["orders"]==[]
+
+
+def test_manual_fill_uses_approved_request_inside_ledger_transaction(local_api):
+    _client,post,paper,_app,_root,_sec,_front,_market,quote,owner=local_api
+    funds(post,paper,owner)
+    key="qa-approved-atomic-check"
+    assert approval_order(post,key).json()["status"]=="approval_pending"
+    assert post("/api/v1/stage1/approvals/decide",{
+        "request_id":key,"approve":True}).status_code==200
+    paper.trade(owner,"kr-base","069500","BUY",1,key,quote,
+                manual_approval_krw="310000")
+    assert len(paper.orders(owner,"kr-base")["orders"])==1
+
+
+def test_current_time_audit_rejects_future_dated_funding_instead_of_repair(local_api):
+    from datetime import datetime, timedelta, timezone
+    from wealthy_server.stage7_release import audit_paper_ledger
+    _client,post,paper,_app,_root,_sec,_front,_market,_quote,owner=local_api
+    funds(post,paper,owner)
+    with sqlite3.connect(paper.path) as db:
+        db.execute("UPDATE stage1_events SET created_utc=? "
+                   "WHERE owner=? AND event_key='initial'",
+                   ((datetime.now(timezone.utc)+timedelta(days=1)).isoformat(),owner))
+        db.commit()
+    finding=audit_paper_ledger(owner,paper,now=datetime.now(timezone.utc))
+    assert finding["status"]=="blocked"
+    assert finding["paper_execution_permitted_by_integrity"] is False
+    assert "INVALID_FUNDING_EVENT" in {item["code"] for item in finding["issues"]}

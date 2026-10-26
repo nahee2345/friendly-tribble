@@ -129,4 +129,54 @@ describe('QA-016-03 manual assets idempotent UI',()=>{
     expect(localStorage.getItem('wealthy:manual-unresolved:v1')).toContain('unconfirmed-still-pending-01');
   });
 
+  it('does not claim success if a 200 response omitted the acknowledged status',async()=>{
+    let writes=0;
+    vi.stubGlobal('crypto',{randomUUID:()=> 'ambiguous-200-reply-id'});
+    vi.spyOn(globalThis,'fetch').mockImplementation((_path,opts)=>{
+      if(opts?.method==='POST'){writes++;return json({});}
+      return json(empty());
+    });
+    render(<ManualAssetsPanel/>);
+    fireEvent.click(await screen.findByRole('button',{name:'선택한 현금 내역 기록'}));
+    await screen.findByText(/저장 결과 확인 불가/);
+    expect(writes).toBe(1);
+    expect(localStorage.getItem('wealthy:manual-unresolved:v1')).toContain('ambiguous-200-reply-id');
+    expect(screen.getByRole('button',{name:'선택한 현금 내역 기록'})).toBeDisabled();
+  });
+
+  it('keeps successful commit message separate from failed subsequent list refresh',async()=>{
+    let reads=0;
+    vi.stubGlobal('crypto',{randomUUID:()=> 'saved-then-list-failed'});
+    vi.spyOn(globalThis,'fetch').mockImplementation((_path,opts)=>{
+      if(opts?.method==='POST')return json({status:'recorded'});
+      reads++;
+      return reads>1?json({code:'ERROR'},503):json(empty());
+    });
+    render(<ManualAssetsPanel/>);
+    await screen.findByRole('button',{name:'선택한 주식 내역 기록'});
+    fireEvent.click(screen.getByRole('button',{name:'선택한 주식 내역 기록'}));
+    await screen.findByText(/수동 기록 저장을 확인했습니다.*목록 재조회만 실패했습니다/);
+    expect(localStorage.getItem('wealthy:manual-unresolved:v1')).toBeNull();
+    expect(screen.queryByText(/기존 요청 결과가 불확실합니다/)).toBeNull();
+  });
+
+  it('blocks a fresh write immediately when another tab has a pending marker',async()=>{
+    let writes=0;
+    vi.spyOn(globalThis,'fetch').mockImplementation((_path,opts)=>{
+      if(opts?.method==='POST'){writes++;return json({status:'recorded'});}
+      return json(empty());
+    });
+    render(<ManualAssetsPanel/>);
+    await screen.findByRole('button',{name:'선택한 주식 내역 기록'});
+    const marker=JSON.stringify({request_id:'another-tab-unconfirmed-id',kind:'cash',
+      created_at:'2026-10-26T00:00:00Z'});
+    localStorage.setItem('wealthy:manual-unresolved:v1',marker);
+    window.dispatchEvent(new StorageEvent('storage',{
+      key:'wealthy:manual-unresolved:v1',newValue:marker
+    }));
+    await screen.findByText(/다른 탭 또는 이전 사용자의 처리 미확정 요청/);
+    fireEvent.click(screen.getByRole('button',{name:'선택한 주식 내역 기록'}));
+    expect(writes).toBe(0);
+  });
+
 });
