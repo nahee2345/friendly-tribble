@@ -289,3 +289,19 @@ def test_manual_fill_uses_approved_request_inside_ledger_transaction(local_api):
     paper.trade(owner,"kr-base","069500","BUY",1,key,quote,
                 manual_approval_krw="310000")
     assert len(paper.orders(owner,"kr-base")["orders"])==1
+
+
+def test_current_time_audit_rejects_future_dated_funding_instead_of_repair(local_api):
+    from datetime import datetime, timedelta, timezone
+    from wealthy_server.stage7_release import audit_paper_ledger
+    _client,post,paper,_app,_root,_sec,_front,_market,_quote,owner=local_api
+    funds(post,paper,owner)
+    with sqlite3.connect(paper.path) as db:
+        db.execute("UPDATE stage1_events SET created_utc=? "
+                   "WHERE owner=? AND event_key='initial'",
+                   ((datetime.now(timezone.utc)+timedelta(days=1)).isoformat(),owner))
+        db.commit()
+    finding=audit_paper_ledger(owner,paper,now=datetime.now(timezone.utc))
+    assert finding["status"]=="blocked"
+    assert finding["paper_execution_permitted_by_integrity"] is False
+    assert "INVALID_FUNDING_EVENT" in {item["code"] for item in finding["issues"]}
