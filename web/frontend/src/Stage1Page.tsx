@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import './stage1.css';
 import {Stage1Dashboard} from './Stage1Dashboard';
+import {paperControlDisplay} from './paperControlDisplay';
 
 type A={id:string;name:string;kind:string;krw_cash:string;usd_cash:string;holdings:{symbol:string;quantity:number}[];trades:number};
 type PlannedOrder={request_id:string;side:'BUY'|'SELL';account:string;symbol:string;quantity:number;kind:string;market:string;planned_price:string;notional_krw:string;strategy_score:number|null;coverage_pct:number;reason:string};
@@ -144,9 +145,11 @@ export function Stage1Page(){
   async function createPaperBackup(){await action(async()=>{await post('/api/v1/stage1/backups',{});await reloadBackups();},'가상 원장 백업과 무결성 검사가 완료되었습니다.');}
 
   const [approvals,setApprovals]=useState<Approval[]>([]);
-  async function reloadControls(){get<{paused:boolean;reason:string}>('/api/v1/stage1/trade-control').then(setPaperControl).catch(()=>{});
+  async function reloadControls(){setPaperControl(null);
+    get<{paused:boolean;reason:string}>('/api/v1/stage1/trade-control').then(setPaperControl).catch(()=>setPaperControl(null));
     get<{items:Approval[]}>('/api/v1/stage1/approvals').then(r=>setApprovals(r.items)).catch(()=>{});}
-  async function togglePaper(paused:boolean){await action(async()=>{setPaperControl(await post('/api/v1/stage1/trade-control',{paused,reason:paused?'사용자 긴급 중지':'사용자 가상운용 허용'}));},
+  async function togglePaper(paused:boolean){setPaperControl(null);
+    await action(async()=>{setPaperControl(await post('/api/v1/stage1/trade-control',{paused,reason:paused?'사용자 긴급 중지':'사용자 가상운용 허용'}));},
     paused?'모의투자 자동 주문을 중지했습니다.':'가상 투자 검토를 허용했습니다.');}
   async function executeApprovedOrder(a:Approval){
     if(approvalExecuteLock.current)return;
@@ -279,9 +282,9 @@ export function Stage1Page(){
       </article>)}
       {!unreadCount&&<p className="s1-empty">새 알림이 없습니다.</p>}
     </section>
-    <section className="s1-panel"><div className="s1-panelhead"><h2>모의거래 긴급 중지</h2><span>{paperControl?.paused?'가상 자동주문 중지':'가상 자동주문 허용'}</span></div>
-      <p className="s1-desc">현재 상태: {paperControl?.reason??'상태 확인 중'}. 새 환경은 기본 중지입니다. 켜더라도 시세·위험 검사에 실패하면 가상 매매는 실행되지 않습니다.</p>
-      <button className="s1-primary" disabled={busy||!paperControl} onClick={()=>void togglePaper(!paperControl?.paused)}>{paperControl?.paused?'가상 자동매매 시작 허용':'긴급 중지'}</button>
+    <section className="s1-panel"><div className="s1-panelhead"><h2>모의거래 긴급 중지</h2><span role="status">{paperControlDisplay(paperControl?.paused??null).label}</span></div>
+      <p className="s1-desc">현재 상태: {paperControl?.reason??'서버에서 상태를 확인할 수 없습니다. 가상 거래 실행을 보류합니다.'}. 새 환경은 기본 중지입니다. 켜더라도 시세·위험 검사에 실패하면 가상 매매는 실행되지 않습니다.</p>
+      <button className="s1-primary" disabled={busy} onClick={()=>void togglePaper(paperControlDisplay(paperControl?.paused??null).nextPaused)}>{paperControlDisplay(paperControl?.paused??null).action}</button>
     </section>
     <section className="s1-panel"><div className="s1-panelhead"><h2>모의거래 승인 대기</h2><button className="s1-outline" onClick={()=>void reloadControls()}>새로고침</button></div>
       <p className="s1-desc">30만원 이상 수동 모의주문은 승인 대기하며 24시간 후 만료됩니다. 승인만으로 실제 거래·모의 체결은 일어나지 않습니다.</p>
