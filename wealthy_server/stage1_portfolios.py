@@ -174,7 +174,8 @@ class Portfolios:
         return {'orders':[dict(zip(('id','symbol','side','quantity','price','currency','source','as_of','timestamp'),r)) for r in rows]}
 
     def trade(self,owner,portfolio,symbol,side,quantity,request_id,quote, *,
-              manual_approval_krw=None, manual_fx_krw_per_usd=None):
+              manual_approval_krw=None, manual_fx_krw_per_usd=None,
+              verified_turnover_session_date=None):
         if not isinstance(symbol,str) or not SYMBOL.fullmatch(symbol) or side not in ('BUY','SELL') or not isinstance(quantity,int) or isinstance(quantity,bool) or not 1<=quantity<=100000 or not valid_key(request_id):raise ValueError('주문 입력 오류')
         currency=quote['currency'];price=Decimal(quote['price'])
         if currency not in ('USD','KRW') or not price.is_finite() or price<=0 or price.as_tuple().exponent < -4: raise ValueError('가격 검증 오류')
@@ -194,7 +195,19 @@ class Portfolios:
             prior=db.execute('SELECT symbol,side,quantity,price,currency FROM virtual_orders WHERE owner=? AND portfolio=? AND request_id=?',(owner,portfolio,request_id)).fetchone()
             if prior:
                 if prior!=(symbol,side,quantity,format(price,'f'),currency): raise ValueError('요청 충돌')
+                if verified_turnover_session_date is not None:
+                    # Existing fills must be represented by the same-session
+                    # reservation claim, or fail closed on historic orphans.
+                    from .stage1_turnover_reservations import _coverage, _day
+                    _coverage(db,owner,_day(verified_turnover_session_date))
+                    matched=db.execute("""SELECT state FROM stage1_turnover_claims
+                        WHERE owner=? AND request_id=? AND session_date=?""",
+                        (owner,request_id,verified_turnover_session_date)).fetchone()
+                    if not matched or matched[0]!='FILLED':
+                        raise ValueError('UNRECONCILED_PAPER_FILL')
             else:
+                if verified_turnover_session_date is not None and manual_approval_krw is None:
+                    raise ValueError('VERIFIED_TURNOVER_NOTIONAL_REQUIRED')
                 if manual_approval_krw is not None:
                     # HTTP approval preflight is a UX optimization, not a
                     # security boundary. Lock the SQLite writer and re-check
@@ -234,8 +247,21 @@ class Portfolios:
                 krw,usd,holdings,_=self._money(db,owner,portfolio)
                 if side=='BUY' and (usd if currency=='USD' else krw)<price*quantity: raise ValueError('현금 부족')
                 if side=='SELL' and holdings.get(symbol,0)<quantity: raise ValueError('보유수량 부족')
+                if verified_turnover_session_date is not None:
+                    # The opening NAV/provenance must already exist in an
+                    # immutable session row from an independent verifier.
+                    # Reserve BUY+SELL gross across ALL owner accounts before
+                    # any simulated fill, using THIS BEGIN IMMEDIATE lock.
+                    from .stage1_turnover_reservations import reserve
+                    reserve(db,owner=owner,session_date=verified_turnover_session_date,
+                        request_id=request_id,account=portfolio,symbol=symbol,side=side,
+                        quantity=quantity,gross_krw=manual_approval_krw,
+                        now_utc=datetime.now(timezone.utc).isoformat())
                 db.execute('INSERT INTO virtual_orders VALUES(?,?,?,?,?,?,?,?,?,?,?)',(owner,portfolio,request_id,symbol,side,quantity,format(price,'f'),currency,quote['source'],quote['as_of'],datetime.now(timezone.utc).isoformat()))
                 self._receipt(db,owner,portfolio,request_id,quote)
+                if verified_turnover_session_date is not None:
+                    from .stage1_turnover_reservations import mark_filled
+                    mark_filled(db,owner,request_id,datetime.now(timezone.utc).isoformat())
             db.execute('COMMIT')
         return self.list(owner)
 

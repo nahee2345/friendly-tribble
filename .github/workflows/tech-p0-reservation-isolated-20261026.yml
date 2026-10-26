@@ -1,0 +1,64 @@
+name: Wealthy P0 Turnover Reservation Isolation
+on:
+  push:
+    branches: [tech/pre-kis-p0-reservation-20261026]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  reservation:
+    name: Isolated owner-wide turnover and P0 regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+      - name: Install isolated requirements
+        run: |
+          python -m pip install -e '.[web]' pytest
+          npm --prefix web/frontend ci
+      - name: Reservation transitions and existing P0 API
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+        run: |
+          python -m pytest -q \
+            tests/test_p0_session_reservations.py \
+            tests/test_p0_turnover.py \
+            tests/test_qa_p0_api_ledger.py \
+            tests/test_stage1_controls_cards.py \
+            tests/test_qa001_003_manual_scope.py \
+            tests/test_qa016_news_freshness.py \
+            tests/test_qa002_last_good_news.py
+      - name: React manual re-entry and tab isolation
+        run: npm --prefix web/frontend run test -- src/ManualAssetsPanel.qa016.test.tsx
+      - name: TypeScript / Vite build
+        run: npm --prefix web/frontend run build
+      - name: Backup and restart isolation
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+        run: |
+          python -m pytest -q \
+            tests/test_stage1_backup.py tests/test_stage1_schema_migration.py \
+            tests/test_web_local_backup.py \
+            tests/test_stage1_paper.py::test_funding_restart_no_duplicate
+  historical-regression-known-blocker:
+    name: Preserve unchanged legacy regression result
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[web]' pytest
+      - name: Legacy acceptance tests (failure stays visible)
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+        run: bash scripts/stage7_acceptance.sh
