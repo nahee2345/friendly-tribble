@@ -35,19 +35,23 @@ jobs:
         run: |
           cat >/tmp/wealthy_clock_qa.py <<'PY'
           import os
-          import itertools
-          from datetime import datetime,timedelta
-          import pytest
           from freezegun import freeze_time
-          _case=itertools.count()
-          @pytest.fixture(autouse=True)
-          def fixed_test_clock():
-              t=datetime.fromisoformat(os.environ["QA_FIXED_CLOCK"].replace("Z","+00:00"))
-              # Every case remains within the reference minute, while distinct
-              # milliseconds avoid migration backup filename collisions.
-              with freeze_time(t+timedelta(milliseconds=next(_case)*50),
-                               auto_tick_seconds=0.0001):
-                  yield
+
+          _clock = None
+
+          def pytest_configure(config):
+              # Start BEFORE pytest imports the test modules. Stage5 defines
+              # START=datetime.now(UTC) during module import, not in a fixture.
+              global _clock
+              _clock=freeze_time(os.environ["QA_FIXED_CLOCK"],
+                                 auto_tick_seconds=0.001)
+              _clock.start()
+
+          def pytest_unconfigure(config):
+              global _clock
+              if _clock is not None:
+                  _clock.stop()
+                  _clock=None
           PY
       - name: Run same unchanged Stage4-7 acceptance files, compare failures
         env:
