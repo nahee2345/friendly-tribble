@@ -126,6 +126,26 @@ def establish_session(db, *, owner, session_date, opening_nav_krw,
     return {"session_date":day,"cap_krw":str(nav*Decimal("0.20"))}
 
 
+
+def establish_calendar_checked_session(
+    db, *, owner, session_date, opening_nav_krw, nav_source, verified_utc
+):
+    """Pinned 2026 NYSE hours, never a user-invented session time window.
+
+    Only calendar window is independently checked here. The upstream NAV
+    valuation, quote/FX data freshness and exchange extraordinary halts
+    still require independent verification; this method MUST NOT imply
+    the full PAPER trading gate is ready.
+    """
+    from .stage1_us_market_calendar import nyse_regular_window
+    official=nyse_regular_window(session_date)
+    return establish_session(
+        db,owner=owner,session_date=session_date,
+        opening_nav_krw=opening_nav_krw,nav_source=nav_source,
+        verified_utc=verified_utc,
+        start_utc=official["open_utc"],end_utc=official["close_utc"]
+    )
+
 def _session(db,owner,day):
     row=db.execute("""SELECT opening_nav_krw,start_utc,end_utc,verified_utc
                       FROM stage1_turnover_sessions
