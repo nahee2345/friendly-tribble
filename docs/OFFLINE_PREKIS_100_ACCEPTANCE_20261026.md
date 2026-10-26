@@ -34,7 +34,11 @@
 
 - Stage4 10, Stage5 5, Stage6 1, Stage7 8. 오래된 테스트의 시간 불일치가 `INVALID_FUNDING_EVENT` 및 `INVALID_FUNDING_ALLOCATION`을 초래할 수 있음.
 - 특히 Stage5의 `START=datetime.now(timezone.utc)`는 **테스트 모듈 import 시점**에 평가됨. `pytest.fixture(autouse=True)`에서 나중에 freezegun을 켜면 `START`는 원래 시간이므로 테스트 전체가 다른 날짜를 혼용.
-- 신규 `tech-offline-legacy-clock-20261026.yml`: `pytest_configure`에서 수집 **이전**에 기준 시각을 고정, baseline/후보에 동일 파일·시각 사용. 이 시험은 역사적 원장/시장 fixture 재현만 증명하며 실제 현재시장 안전성을 승인하지 않음.
+- 신규 `tech-offline-legacy-clock-20261026.yml`: `pytest_configure`에서 수집 **이전**에 기준 시각을 고정, baseline/후보에 동일 파일·시각 사용. [Actions 40267895409](https://github.com/nahee2345/friendly-tribble/actions/runs/40267895409) 실측:
+  - `2026-10-19T10:00:00Z`의 Stage4~7 역사적 fixture: baseline **83 PASS / 0 FAIL**, 후보 **83 PASS / 0 FAIL**.
+  - `2026-10-25T10:00:00Z`에서 같은 역사적 테스트 실행: **59 PASS / 24 FAIL** (테스트와 원장시각의 불일치).
+  - `START=datetime.now(...)`는 테스트 수집 시점에 계산되므로 `pytest.fixture` 시각고정이 아니라 import 전 시각고정이 필요. 생산 코드에서 원장시각을 소급 바꾸거나 원장 감사를 낮추면 안 됨.
+  - 역사적 fixture 시험 PASS는 과거 날짜의 가상 자료 정합성만 확인하며 **현재 시점 위험·시장 세션 검증 완료가 아님**.
 - 25일 350,000원 실제 가상입금 기대와 400만원 초기 기대가 충돌하는 경우, 정확히 어떤 날짜의 snapshot인지 먼저 규정. 입금/원장 보호를 변경해 테스트를 맞추면 안 됨.
 
 ### 이번 기술팀 후보 변경·검증 (2026-10-26)
