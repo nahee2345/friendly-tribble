@@ -118,7 +118,7 @@ def establish_session(db, *, owner, session_date, opening_nav_krw,
 
 
 def _session(db,owner,day):
-    row=db.execute("""SELECT opening_nav_krw,start_utc,end_utc
+    row=db.execute("""SELECT opening_nav_krw,start_utc,end_utc,verified_utc
                       FROM stage1_turnover_sessions
                       WHERE owner=? AND session_date=?""",(owner,day)).fetchone()
     if row is None:
@@ -128,7 +128,7 @@ def _session(db,owner,day):
 
 def _coverage(db,owner,day):
     """Reject all fills that predate integration and unclaimed Stage4 work."""
-    nav,start,end=_session(db,owner,day)
+    nav,start,end,verified=_session(db,owner,day)
     claims=db.execute("""SELECT request_id,session_date,side,gross_krw,
                      state,reconciled_no_fill,account,symbol,quantity
                      FROM stage1_turnover_claims
@@ -158,7 +158,7 @@ def _coverage(db,owner,day):
                   LIMIT 1""",(owner,)).fetchone()
         if unresolved:
             raise ValueError("UNRECONCILED_STAGE4_CLAIM")
-    return nav,claims
+    return nav,claims,start,end,verified
 
 
 def reserve(db, *, owner, session_date, request_id, account, symbol, side,
@@ -178,7 +178,7 @@ def reserve(db, *, owner, session_date, request_id, account, symbol, side,
         or state not in ("PENDING","RESERVED")):
         raise ValueError("invalid reservation identity")
     stamp=_instant(now_utc);gross=_number(gross_krw)
-    nav,claims=_coverage(db,owner,day)
+    nav,claims,start,end,verified=_coverage(db,owner,day)
     prior=db.execute("""SELECT session_date,account,symbol,side,quantity,
                       gross_krw,state FROM stage1_turnover_claims
                       WHERE owner=? AND request_id=?""",(owner,request_id)).fetchone()
@@ -189,6 +189,8 @@ def reserve(db, *, owner, session_date, request_id, account, symbol, side,
             raise ValueError("CLOSED_REQUEST_CANNOT_REPLAY")
         return {"status":"already_reserved","request_id":request_id,
                 "state":prior[6]}
+    if not verified<=stamp<end or stamp<start:
+        raise ValueError("US_MARKET_SESSION_NOT_VERIFIED_OR_CLOSED")
     rows=[{"request_id":r[0],"session_date":r[1],"side":r[2],
            "gross_notional_krw":r[3],"status":r[4],
            "reconciled_no_fill":r[5]==1} for r in claims]
