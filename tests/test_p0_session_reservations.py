@@ -314,3 +314,35 @@ def test_opt_in_trade_concurrent_accounts_share_one_owner_cap(tmp_path):
     with p._db() as db:
         assert db.execute("SELECT COUNT(*) FROM stage1_turnover_claims").fetchone()[0]==4
         assert db.execute("SELECT COUNT(*) FROM virtual_orders").fetchone()[0]==4
+
+def test_reservation_needs_actual_verified_session_window(tmp_path):
+    p=store(tmp_path)
+    with p._db() as db:
+        db.execute("BEGIN IMMEDIATE")
+        with pytest.raises(ValueError,match="US_MARKET_SESSION_NOT_VERIFIED_OR_CLOSED"):
+            reserve(db,owner=OWNER,session_date=SESSION,
+                request_id="outside-hours-001",account="kr-base",symbol="069500",
+                side="BUY",quantity=1,gross_krw="100000",
+                now_utc="2026-10-26T21:00:00+00:00")
+        with pytest.raises(ValueError,match="US_MARKET_SESSION_NOT_VERIFIED_OR_CLOSED"):
+            reserve(db,owner=OWNER,session_date=SESSION,
+                request_id="too-early-hours-001",account="kr-base",symbol="069500",
+                side="BUY",quantity=1,gross_krw="100000",
+                now_utc="2026-10-26T13:31:00+00:00")
+        assert db.execute("SELECT COUNT(*) FROM stage1_turnover_claims").fetchone()[0]==0
+        db.execute("COMMIT")
+
+
+def test_session_proof_is_owner_scoped_and_cannot_be_weakened(tmp_path):
+    p=store(tmp_path)
+    with p._db() as db:
+        db.execute("BEGIN IMMEDIATE")
+        with pytest.raises(ValueError,match="opening NAV/session proof is immutable"):
+            establish_session(db,owner=OWNER,session_date=SESSION,
+                opening_nav_krw=NAV,nav_source="totally-different-research-source",
+                verified_utc=STAMP,start_utc=START,end_utc=END)
+        with pytest.raises(ValueError,match="invalid verified US session window"):
+            establish_session(db,owner="another",session_date=SESSION,
+                opening_nav_krw=NAV,nav_source="verified-historical-valuation-fixture",
+                verified_utc=STAMP,start_utc=END,end_utc=START)
+        db.execute("COMMIT")
