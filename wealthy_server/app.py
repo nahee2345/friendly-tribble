@@ -972,12 +972,14 @@ def create_app(
                 from decimal import Decimal, ROUND_CEILING
                 price=Decimal(str(quote["price"]))
                 cost=price*body.quantity
+                verified_fx_rate=None
                 if quote.get("currency")=="USD":
                     from .stage1_research import current_fx
                     fx=current_fx()
                     if fx.get("status")!="ok":
                         raise _error(422,"FX_UNVERIFIED","환율을 확인할 수 없어 가상 주문을 보류합니다.")
-                    cost*=Decimal(str(fx["usd_krw"]))
+                    verified_fx_rate=str(fx["usd_krw"])
+                    cost*=Decimal(verified_fx_rate)
                 if not cost.is_finite() or cost<=0:
                     raise ValueError("unverified notional")
                 approvals=list_approvals(actor.owner_id,portfolio_store)["items"]
@@ -1006,7 +1008,11 @@ def create_app(
                 if gate=="ALREADY_EXECUTED":
                     return {"status":"already_executed","traded":False,
                             "request_id":body.request_id}
-                return portfolio_store.trade(actor.owner_id, body.portfolio, body.symbol, body.side, body.quantity, body.request_id, quote)
+                return portfolio_store.trade(
+                    actor.owner_id, body.portfolio, body.symbol, body.side,
+                    body.quantity, body.request_id, quote,
+                    manual_approval_krw=cost, manual_fx_krw_per_usd=verified_fx_rate
+                )
             except (ValueError, KeyError, ArithmeticError):
                 raise _error(400, "PAPER_ORDER_REJECTED", "시세·계좌·잔고 또는 주문 정보를 확인해 주세요.") from None
 
