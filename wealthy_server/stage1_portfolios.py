@@ -253,10 +253,16 @@ class Portfolios:
                     # Reserve BUY+SELL gross across ALL owner accounts before
                     # any simulated fill, using THIS BEGIN IMMEDIATE lock.
                     from .stage1_turnover_reservations import reserve
-                    reserve(db,owner=owner,session_date=verified_turnover_session_date,
+                    reservation=reserve(db,owner=owner,
+                        session_date=verified_turnover_session_date,
                         request_id=request_id,account=portfolio,symbol=symbol,side=side,
                         quantity=quantity,gross_krw=manual_approval_krw,
                         now_utc=datetime.now(timezone.utc).isoformat())
+                    # After a dropped reply, an old RESERVED/PENDING/UNKNOWN
+                    # request is uncertain until explicitly reconciled.
+                    # An already-reserved ID is NEVER permission to fill.
+                    if reservation["status"] != "RESERVED":
+                        raise ValueError("RESERVATION_RECONCILIATION_REQUIRED")
                 db.execute('INSERT INTO virtual_orders VALUES(?,?,?,?,?,?,?,?,?,?,?)',(owner,portfolio,request_id,symbol,side,quantity,format(price,'f'),currency,quote['source'],quote['as_of'],datetime.now(timezone.utc).isoformat()))
                 self._receipt(db,owner,portfolio,request_id,quote)
                 if verified_turnover_session_date is not None:
