@@ -1,0 +1,30 @@
+name: QA Stage2 isolated stop and restart
+on:
+  push:
+    branches:
+      - qa/stage2-isolated-controls-regression-20261104
+  workflow_dispatch:
+jobs:
+  qa-independent-stop:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install isolated testing dependencies
+        run: |
+          python -m pip install -e '.[web]' pytest
+      - name: QA-owned no-fill, missing control and subprocess restart
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+        run: |
+          python -m pytest -q -rA tests/test_qa_stage2_independent_stop.py
+      - name: Existing targeted turnover and request-id contracts (separate evidence)
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+        run: |
+          python -m pytest -q tests/test_p0_session_reservations.py tests/test_p0_turnover.py
