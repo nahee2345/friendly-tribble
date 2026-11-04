@@ -11,8 +11,9 @@ ISA_ETF_ALLOWED = frozenset({'069500', '360750'})
 KINDS = ('GENERAL_OVERSEAS','GENERAL_DOMESTIC','ISA_SIMULATED')
 
 class Portfolios:
-    def __init__(self, location: Path):
+    def __init__(self, location: Path, *, require_verified_p0=False):
         self.path = Path(location)
+        self.require_verified_p0 = bool(require_verified_p0)
         if self.path.is_symlink() or not self.path.parent.is_dir() or self.path.parent.is_symlink():
             raise ValueError('안전하지 않은 경로')
 
@@ -150,6 +151,8 @@ class Portfolios:
                 quantity=1,request_id=request_id,quote=quote,
                 session_date=verified_turnover_session_date,
                 fx=verified_fx_evidence,auto_fx=True,now=now)
+        if self.require_verified_p0:
+            raise ValueError("USE_VERIFIED_ATOMIC_PAPER_ENGINE")
         from decimal import ROUND_UP, ROUND_DOWN
         if not valid_key(request_id) or not SYMBOL.fullmatch(symbol):
             raise ValueError('요청 식별자 오류')
@@ -203,6 +206,8 @@ class Portfolios:
     def trade(self,owner,portfolio,symbol,side,quantity,request_id,quote, *,
               manual_approval_krw=None, manual_fx_krw_per_usd=None,
               verified_turnover_session_date=None):
+        if self.require_verified_p0:
+            raise ValueError("USE_VERIFIED_ATOMIC_PAPER_ENGINE")
         if not isinstance(symbol,str) or not SYMBOL.fullmatch(symbol) or side not in ('BUY','SELL') or not isinstance(quantity,int) or isinstance(quantity,bool) or not 1<=quantity<=100000 or not valid_key(request_id):raise ValueError('주문 입력 오류')
         currency=quote['currency'];price=Decimal(quote['price'])
         if currency not in ('USD','KRW') or not price.is_finite() or price<=0 or price.as_tuple().exponent < -4: raise ValueError('가격 검증 오류')
