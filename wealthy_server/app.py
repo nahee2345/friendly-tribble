@@ -401,7 +401,7 @@ def create_app(
         stage1 = Stage1Ledger(Path(db.engine.url.database).parent / "stage1-paper.sqlite3")
 
         from .stage1_portfolios import Portfolios
-        portfolio_store = Portfolios(Path(db.engine.url.database).parent / "stage1-paper.sqlite3")
+        portfolio_store = Portfolios(Path(db.engine.url.database).parent / "stage1-paper.sqlite3", require_verified_p0=True)
 
         class NewPortfolioBody(BaseModel):
             name: str = Field(min_length=1, max_length=40)
