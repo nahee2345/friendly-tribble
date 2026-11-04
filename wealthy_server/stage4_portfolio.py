@@ -488,6 +488,11 @@ class PortfolioEngine:
             return {"status":"session_unverified",
                     "reason":readiness["reason"],"executed":[],"skipped":[],
                     "simulated_only":True,"trade_enabled":False}
+        # The only supported runtime route after the release gate:
+        # preflight first, then ONE writer per claim + FX + fill + receipt.
+        # The legacy multi-transaction body below is not a runtime fallback.
+        from .stage4_p0_verified import run_verified_stage4
+        return run_verified_stage4(self,owner,now=now)
         # Stage7: a read-only cross-table preflight precedes each unattended
         # paper fill. A corrupt order, interrupted claim or invalid historic
         # cash cannot be paper-traded through. No automatic data rewriting.
