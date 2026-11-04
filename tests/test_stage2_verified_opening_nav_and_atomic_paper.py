@@ -277,3 +277,55 @@ def test_stage4_dispatches_through_owner_claim_and_receipt(tmp_path,monkeypatch)
     repeat=engine.run(OWNER,now=NOW)
     assert not repeat["executed"]
     assert len(p.orders(OWNER,"default")["orders"])==1
+
+
+def _parallel_order(location,number):
+    p=Portfolios(location,require_verified_p0=True)
+    try:
+        out=execute_verified_paper(
+            p,owner=OWNER,account="kr-base",symbol="069500",
+            side="BUY",quantity=20,request_id=f"multios-{number:04d}",
+            quote=KR,session_date=DAY,now=NOW)
+        return out["status"]
+    except (ValueError,sqlite3.OperationalError) as exc:
+        return str(exc)
+
+
+def test_two_or_more_os_processes_share_owner_800k_limit(tmp_path):
+    from concurrent.futures import ProcessPoolExecutor
+    p,_,_=ready(tmp_path)
+    with ProcessPoolExecutor(max_workers=4) as pool:
+        results=list(pool.map(_parallel_order,[str(p.path)]*8,range(8)))
+    assert results.count("executed")==4,results
+    assert all(x=="executed" or
+               "GROSS_TURNOVER_CAP_EXCEEDED" in x for x in results),results
+    with p._db() as db:
+        claims=db.execute("""SELECT gross_krw,state FROM stage1_turnover_claims
+                            WHERE owner=?""",(OWNER,)).fetchall()
+        assert len(claims)==4
+        assert all(x[0]=="200000" and x[1]=="FILLED" for x in claims)
+        assert db.execute("""SELECT COUNT(*) FROM virtual_orders
+                             WHERE owner=?""",(OWNER,)).fetchone()[0]==4
+
+
+def test_unknown_reservation_is_not_released_or_replayed(tmp_path):
+    from wealthy_server.stage1_turnover_reservations import reserve,mark_unknown
+    p,_,_=ready(tmp_path)
+    with p._db() as db:
+        db.execute("BEGIN IMMEDIATE")
+        reserve(db,owner=OWNER,session_date=DAY,
+                request_id="unknown-p0-001",account="default",
+                symbol="SPYM",side="SELL",quantity=1,gross_krw="750000",
+                now_utc=NOW.isoformat())
+        mark_unknown(db,OWNER,"unknown-p0-001",NOW.isoformat())
+        db.execute("COMMIT")
+    with pytest.raises(ValueError,match="GROSS_TURNOVER_CAP_EXCEEDED"):
+        execute_verified_paper(p,owner=OWNER,account="default",
+            symbol="SPYM",side="BUY",quantity=1,
+            request_id="blocked-after-unknown-001",
+            quote=US,fx=FX,auto_fx=True,session_date=DAY,now=NOW)
+    with p._db() as db:
+        assert db.execute("""SELECT state FROM stage1_turnover_claims
+                 WHERE owner=? AND request_id='unknown-p0-001'""",
+                 (OWNER,)).fetchone()[0]=="UNKNOWN"
+        assert db.execute("SELECT COUNT(*) FROM virtual_orders").fetchone()[0]==0
