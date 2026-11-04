@@ -205,3 +205,75 @@ def test_stage4_conservative_5pct_is_stricter_than_20pct(tmp_path):
             fx=FX,auto_fx=True,session_date=DAY,now=NOW,stage4_plan=plan)
     with p._db() as db:
         assert db.execute("""SELECT COUNT(*) FROM stage1_turnover_claims""").fetchone()[0]==0
+
+
+def test_runtime_portfolios_reject_legacy_unreserved_bypass(tmp_path):
+    p,_,_=ready(tmp_path)
+    guarded=Portfolios(p.path,require_verified_p0=True)
+    with pytest.raises(ValueError,match="USE_VERIFIED_ATOMIC_PAPER_ENGINE"):
+        guarded.trade(OWNER,"kr-base","069500","BUY",1,"legacy-test-0001",KR)
+    with pytest.raises(ValueError,match="USE_VERIFIED_ATOMIC_PAPER_ENGINE"):
+        guarded.auto_buy_usd_with_fx(OWNER,"SPYM",US,"1400","legacy-fx-0001")
+    assert execute_verified_paper(guarded,owner=OWNER,account="default",
+        symbol="SPYM",side="BUY",quantity=1,request_id="allowed-p0-0001",
+        quote=US,fx=FX,auto_fx=True,session_date=DAY,now=NOW)["status"]=="executed"
+
+
+def test_stage4_dispatches_through_owner_claim_and_receipt(tmp_path,monkeypatch):
+    p,cache,_=ready(tmp_path)
+    from wealthy_server.stage1_strategy_policy import DEFAULT_WEIGHTS
+    from wealthy_server.stage4_portfolio import PortfolioEngine
+    policy=StrategyPolicy(p)
+    prefs=PreferenceStore(p.path)
+    policy_weights=policy.get(OWNER)["weights"]
+    policy_prefs=prefs.get(OWNER)
+    plan={
+        "status":"ready","reason":"","trade_enabled":True,
+        "proposed_orders":[{
+            "request_id":"s4:20261104:p0-a","symbol":"SPYM","side":"BUY",
+            "quantity":1,"account":"default","kind":"ETF",
+            "planned_price":"100","notional_krw":"140000",
+            "source_hash":"p"*64,"risk_history_hash":"h"*64}],
+        "plan_hash":"a"*64,"daily_spend_cap_krw":"200000",
+        "portfolio_value_krw":"4000000","reserve_percent":"10",
+        "policy_prefs":policy_prefs,"policy_weights":policy_weights,
+        "review":[]}
+    class MarketEvidence:
+        def latest_many(self,pairs,*,now=None):
+            values={}
+            for pair in pairs:
+                if pair==("PRICE","SPYM"):
+                    values[pair]={"sha256":"p"*64}
+                elif pair==("HISTORY","SPYM"):
+                    values[pair]={"sha256":"h"*64}
+                elif pair==("FX","USD/KRW"):
+                    values[pair]={
+                        "status":"stale","kind":"FX","symbol":"USD/KRW",
+                        "provider":"FRANKFURTER","source_url":FX_URL,
+                        "last_verified_utc":BEFORE.isoformat(),
+                        "as_of":"2026-11-03","sha256":"f"*64,
+                        "tradeable":False,"use_for_paper_execution":False,
+                        "data":{"rate":"1400"}}
+            return values
+    engine=PortfolioEngine(p,prefs,MarketEvidence(),policy=policy,
+        quote_provider=lambda symbol:US,fx_provider=lambda:FX)
+    monkeypatch.setattr(engine,"preview",lambda owner,now=None:plan)
+    monkeypatch.setattr("wealthy_server.p0_paper_execution_readiness.paper_execution_readiness",
+                        lambda:{"verified":True,"session_date":DAY})
+    monkeypatch.setattr("wealthy_server.stage7_release.audit_paper_ledger",
+                        lambda *args,**kwargs:{"blocking_count":0})
+    monkeypatch.setattr("wealthy_server.stage4_p0_verified.review_candidate",
+                        lambda *args,**kwargs:{"buy_guard":{"status":"permitted_for_stage4_checks"}})
+    outcome=engine.run(OWNER,now=NOW)
+    assert len(outcome["executed"])==1,outcome
+    assert outcome["executed"][0]["symbol"]=="SPYM"
+    with p._db() as db:
+        assert db.execute("""SELECT COUNT(*) FROM stage1_turnover_claims
+                              WHERE owner=? AND state='FILLED'""",(OWNER,)).fetchone()[0]==1
+        assert db.execute("""SELECT status FROM stage4_execution_claims
+                              WHERE owner=?""",(OWNER,)).fetchone()[0]=="EXECUTED"
+        assert db.execute("""SELECT COUNT(*) FROM virtual_orders
+                              WHERE owner=?""",(OWNER,)).fetchone()[0]==1
+    repeat=engine.run(OWNER,now=NOW)
+    assert not repeat["executed"]
+    assert len(p.orders(OWNER,"default")["orders"])==1
