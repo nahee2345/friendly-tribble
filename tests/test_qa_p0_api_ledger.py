@@ -319,3 +319,12 @@ def test_http_order_refuses_unverified_opening_nav_without_any_order(local_api):
         assert db.execute(
             "SELECT COUNT(*) FROM virtual_orders WHERE owner=?", (owner,)
         ).fetchone()[0] == 0
+
+
+def test_authenticated_paper_readiness_endpoint_is_unverified(local_api):
+    client, _post, _paper, _app, *_unused = local_api
+    result = client.get("/api/v1/stage1/paper-execution-readiness")
+    assert result.status_code == 200, result.text
+    payload = result.json()
+    assert payload["verified"] is False
+    assert payload["code"] == "UNVERIFIED_SESSION_OPENING_NAV"
