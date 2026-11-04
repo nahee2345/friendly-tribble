@@ -41,7 +41,12 @@ def status(owner, portfolios):
     if row is None:
         return {"paused":True,"reason":"검증 전 기본 중지","changed_at":None,
                 "note":"자동매매 기본 OFF. 수동 활성화 후에도 자료·위험 검증 필요."}
-    return {"paused":bool(row[0]),"reason":row[1],"changed_at":row[2]}
+    # An invalid/null control is unverified, never implicitly enabled.
+    if type(row[0]) is not int or row[0] not in (0, 1):
+        return {"paused":True,"reason":"거래 제어 상태 확인 불가",
+                "changed_at":row[2],"state_verified":False}
+    return {"paused":bool(row[0]),"reason":row[1],"changed_at":row[2],
+            "state_verified":True}
 
 
 def set_paused(owner, portfolios, paused, reason="사용자 설정"):
