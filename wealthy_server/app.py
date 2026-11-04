@@ -961,6 +961,13 @@ def create_app(
         @app.post("/api/v1/stage1/order")
         def stage1_order(body: VirtualOrderBody, actor: Actor = Depends(mutation_actor)) -> dict[str, Any]:
             require_release_ledger_integrity(actor.owner_id)
+            # P0: Never accept the optional old direct-trade fallback through
+            # an authenticated HTTP order. Opening NAV/provenance and the
+            # owner-wide 20% claim must be verified before any approval/fill.
+            from .p0_paper_execution_readiness import paper_execution_readiness
+            readiness=paper_execution_readiness()
+            if not readiness["verified"]:
+                raise _error(409,readiness["code"],readiness["reason"])
             from .stage1_quotes import verified_quote
             from .stage1_controls import (
                 status, request_approval, list_approvals, approval_execution_gate
