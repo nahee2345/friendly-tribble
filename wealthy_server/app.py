@@ -555,6 +555,21 @@ def create_app(
                 raise _error(500, "PAPER_BACKUP_FAILED",
                              "가상계좌 온라인 백업 무결성 또는 저장 경로 검사에 실패했습니다.") from None
 
+        @app.post("/api/v1/stage1/opening-nav/verify")
+        def stage1_opening_nav_verify(
+                actor: Actor = Depends(mutation_actor)) -> dict[str, Any]:
+            """Create proof from prior validated provider records, never input NAV."""
+            from zoneinfo import ZoneInfo
+            from .stage1_nav_proof import establish_verified_opening_nav
+            now=datetime.now(UTC)
+            session_date=now.astimezone(ZoneInfo("America/New_York")).date().isoformat()
+            try:
+                return establish_verified_opening_nav(
+                    portfolio_store,stage2_store,actor.owner_id,session_date,now=now)
+            except (ValueError,KeyError,ArithmeticError):
+                raise _error(409,"UNVERIFIED_SESSION_OPENING_NAV",
+                             "시작 자산의 원장·환율·시세 시각 및 출처 검증이 완료되지 않았습니다.") from None
+
         @app.get("/api/v1/stage1/paper-execution-readiness")
         def stage1_paper_execution_readiness(
                 actor: Actor = Depends(current_actor)) -> dict[str, Any]:
@@ -1022,10 +1037,16 @@ def create_app(
                 if gate=="ALREADY_EXECUTED":
                     return {"status":"already_executed","traded":False,
                             "request_id":body.request_id}
-                return portfolio_store.trade(
-                    actor.owner_id, body.portfolio, body.symbol, body.side,
-                    body.quantity, body.request_id, quote,
-                    manual_approval_krw=cost, manual_fx_krw_per_usd=verified_fx_rate
+                # Same owner+NYSE-session reservation writer used by Stage4
+                # and FX+BUY. There is no unreserved production fallback.
+                from .stage1_verified_execution import execute_verified_paper
+                fx_evidence=fx if quote.get("currency")=="USD" else None
+                return execute_verified_paper(
+                    portfolio_store,owner=actor.owner_id,
+                    account=body.portfolio,symbol=body.symbol,side=body.side,
+                    quantity=body.quantity,request_id=body.request_id,
+                    quote=quote,session_date=readiness["session_date"],
+                    fx=fx_evidence,
                 )
             except (ValueError, KeyError, ArithmeticError):
                 raise _error(400, "PAPER_ORDER_REJECTED", "시세·계좌·잔고 또는 주문 정보를 확인해 주세요.") from None
