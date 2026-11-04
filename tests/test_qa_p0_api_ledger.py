@@ -305,3 +305,17 @@ def test_current_time_audit_rejects_future_dated_funding_instead_of_repair(local
     assert finding["status"]=="blocked"
     assert finding["paper_execution_permitted_by_integrity"] is False
     assert "INVALID_FUNDING_EVENT" in {item["code"] for item in finding["issues"]}
+
+
+def test_http_order_refuses_unverified_opening_nav_without_any_order(local_api):
+    """A logged-in, CSRF-authenticated POST cannot use the old optional path."""
+    _client, post, paper, _app, _root, _sec, _front, _market, _quote, owner = local_api
+    funds(post, paper, owner)
+    result = approval_order(post, "qa-nav-unverified-0001")
+    assert result.status_code == 409, result.text
+    assert "UNVERIFIED_SESSION_OPENING_NAV" in result.text
+    assert paper.orders(owner, "kr-base")["orders"] == []
+    with sqlite3.connect(paper.path) as db:
+        assert db.execute(
+            "SELECT COUNT(*) FROM virtual_orders WHERE owner=?", (owner,)
+        ).fetchone()[0] == 0
