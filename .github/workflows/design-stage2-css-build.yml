@@ -1,0 +1,42 @@
+name: design-stage2-css-build-and-chromium-fixture
+
+on:
+  push:
+    branches:
+      - design/stage2-ui-acceptance-20261104
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-visual-fixture:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+      - name: Install frontend dependencies
+        run: npm ci --prefix web/frontend
+      - name: TypeScript and Vite build
+        run: npm --prefix web/frontend run build
+      - name: Targeted PAPER status unit test
+        run: npm --prefix web/frontend run test -- src/paperControlDisplay.test.ts
+      - name: Install Chromium for design fixture
+        run: |
+          npx --yes playwright@1.58.2 install --with-deps chromium
+          npm install --no-save --prefix /tmp/wealthy-design-playwright playwright@1.58.2
+      - name: Static style/keyboard/zoom screenshot fixture (not authenticated app E2E)
+        run: node scripts/design_stage2_chrome_fixture.mjs
+      - name: Upload screenshot and structured results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: design-stage2-chrome-fixture
+          path: design-artifacts/
+          if-no-files-found: warn
+          retention-days: 14
