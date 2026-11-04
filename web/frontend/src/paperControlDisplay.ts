@@ -29,3 +29,8 @@ export function paperControlDisplay(paused:boolean|null):PaperControlDisplay {
     canEnableAutomatedReview:false
   };
 }
+
+/** Every trade-submit surface uses the same explicit server permission rule. */
+export function paperMayExecute(paused:boolean|null|undefined):boolean {
+  return paused===false;
+}
