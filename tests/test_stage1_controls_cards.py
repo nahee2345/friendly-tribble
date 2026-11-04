@@ -145,6 +145,9 @@ def test_approval_request_key_collision_is_not_marked_filled(tmp_path: Path):
     assert before["executed"] is False
     assert before["needs_reconciliation"] is False
 
+    # Explicitly opt in this disposable historical fixture before simulating
+    # a conflicting legacy fill. The production default remains fail closed.
+    set_paused("owner", p, False, "isolated collision fixture only")
     # Simulate an independently persisted, conflicting old/legacy paper fill.
     p.trade(
         "owner", "kr-base", "360750", "BUY", 1, request_id,
