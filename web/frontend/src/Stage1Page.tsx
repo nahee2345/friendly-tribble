@@ -1,17 +1,30 @@
 import { useEffect, useRef, useState } from 'react';
 import './stage1.css';
 import {Stage1Dashboard} from './Stage1Dashboard';
-import {paperControlDisplay} from './paperControlDisplay';
+import {paperControlDisplay,paperMayExecute} from './paperControlDisplay';
 
 type A={id:string;name:string;kind:string;krw_cash:string;usd_cash:string;holdings:{symbol:string;quantity:number}[];trades:number};
 type PlannedOrder={request_id:string;side:'BUY'|'SELL';account:string;symbol:string;quantity:number;kind:string;market:string;planned_price:string;notional_krw:string;strategy_score:number|null;coverage_pct:number;reason:string};
 type PlannedRisk={account:string;symbol:string;kind:string;return_pct?:number;approval_required?:boolean;reason:string};
-type PortfolioPlan={status:string;reason:string;for_date:string;portfolio_value_krw:string|null;cash_krw_equivalent:string|null;reserve_percent:string;daily_spend_cap_krw:string|null;allocation:Record<string,{target_pct:string;target_krw:string;held_krw:string;drift_krw:string}>;proposed_orders:PlannedOrder[];review:PlannedRisk[];data_errors:string[];trade_enabled:boolean;quant_ready:number;quant_evaluated:number;rules:string[]};
+type PortfolioPlan={status:string;reason:string;for_date:string;portfolio_value_krw:string|null;cash_krw_equivalent:string|null;reserve_percent:string;daily_spend_cap_krw:string|null;allocation:Record<string,{target_pct:string;target_krw:string;held_krw:string;drift_krw:string}>;proposed_orders:PlannedOrder[];review:PlannedRisk[];data_errors:string[];trade_enabled:boolean;turnover_session_verified?:boolean;quant_ready:number;quant_evaluated:number;rules:string[]};
 type AccountingPosition={account:string;symbol:string;currency:string;quantity:number;avg_cost_native:string;price_native:string;unrealized_native:string;value_krw:string;unrealized_krw_total:string|null;market_price_effect_krw:string|null;fx_effect_krw:string|null;fx_split_status:string;price_as_of:string;price_source_url:string};
 type AccountingReport={status:string;valuation_complete:boolean;market_valuation_krw:string|null;contributions_krw:string;gross_change_after_contributions_krw:string|null;gross_change_pct:string|null;reference_usd_krw:string|null;native_gross_pnl:Record<string,{realized:string;unrealized:string}>;positions:AccountingPosition[];realizations:{account:string;symbol:string;currency:string;gross_realized_native:string;realized_price_effect_krw:string|null;realized_fx_effect_krw:string|null}[];potential_dividends:{symbol:string;ex_date:string;currency:string;potential_gross:string;status:string;cash_booked:boolean;source_url:string}[];fee_analysis:{actual_fee_amount_complete:boolean;assumed_rate_each_side_pct:string;illustrative_trade_fees_krw:string|null;not_deducted_from_cash:boolean};xirr:{status:string;pct:number|null;reason?:string};twr:{status:string;pct:number|null;reason?:string};tax_illustrations:{status:string;domestic_isa?:{taxable_gain_proxy_krw:string;general_scenario_tax_krw:string;isa_scenario_tax_krw:string;potential_isa_saving_krw:string;warning:string;included_symbols:string[]}|null;warning?:string;excluded?:{symbol:string;reason:string}[]};cash_flows:{deposits_krw:string;deposit_count:number;internal_transfers_excluded:number;virtual_fx_excluded:number};missing:string[];source_evidence:{kind:string;symbol:string;as_of:string;source_url:string}[];warnings:string[]};
 
 
 type State={initial_krw:number;monthly_krw:number;deposit_day:number;reinvest:boolean;auto_trading_enabled?:boolean;events:{id:string;kind:string;krw:number;usd:string}[]};
+type Stage4Claim={request_id:string;status:string;symbol:string;side:string;account:string;reason:string;updated_utc:string;ledger_order_verified?:boolean};
+function stage4ClaimLabel(claim:Stage4Claim):string{
+  const labels:Record<string,string>={
+    CLAIMED:'처리 미확정 · 자동 재시도 금지',
+    PENDING:'승인 대기', APPROVED:'승인됨 · 체결 전',
+    RESERVED:'20% 한도 예약 · 체결 아님',
+    UNKNOWN:'결과 확인 불가 · 예약 유지 · 자동 재시도 금지',
+    REJECTED:'가상 주문 차단', CANCELED:'취소됨', EXPIRED:'만료됨',
+  };
+  if(claim.status==='EXECUTED'||claim.status==='FILLED')
+    return claim.ledger_order_verified===true?'PAPER 가상체결 원장 확인':'원장 대조 필요 · 체결 미확정';
+  return labels[claim.status]??'상태 확인 불가';
+}
 type Article={title_original:string;title_ko:string|null;url:string;published:string;translation_status:string};
 type Quote={status:string;tradeable:boolean;symbol?:string;price?:string;currency?:string;as_of?:string;delay_notice?:string};
 const money=(v:string|number)=>Number(v).toLocaleString('ko-KR',{maximumFractionDigits:2});
@@ -41,7 +54,7 @@ export function Stage1Page(){
     await refreshAccounting();
   }
 
-  const [stage4History,setStage4History]=useState<{request_id:string;status:string;symbol:string;side:string;account:string;reason:string;updated_utc:string}[]>([]);
+  const [stage4History,setStage4History]=useState<Stage4Claim[]>([]);
   async function refreshStage4(){
     try{
       const [plan,history]=await Promise.all([
@@ -109,6 +122,9 @@ export function Stage1Page(){
   const approvalExecuteLock=useRef(false);
   type Approval={request_id:string;account:string;symbol:string;side:string;quantity:number;amount_krw:number;rationale:string;status:string;expires_at:string;executed:boolean;needs_reconciliation?:boolean};
   const [paperControl,setPaperControl]=useState<{paused:boolean;reason:string}|null>(null);
+  type PaperReadiness={verified:boolean;code:string;reason:string};
+  const [paperReadiness,setPaperReadiness]=useState<PaperReadiness|null>(null);
+  const controlsEpoch=useRef(0);
   type InboxMessage={event_id:string;title:string;detail:string;created_at:string;read_at:string|null};
   const [inboxItems,setInboxItems]=useState<InboxMessage[]>([]);
   const [unreadCount,setUnreadCount]=useState(0);
@@ -145,31 +161,45 @@ export function Stage1Page(){
   async function createPaperBackup(){await action(async()=>{await post('/api/v1/stage1/backups',{});await reloadBackups();},'가상 원장 백업과 무결성 검사가 완료되었습니다.');}
 
   const [approvals,setApprovals]=useState<Approval[]>([]);
-  async function reloadControls(){setPaperControl(null);
-    get<{paused:boolean;reason:string}>('/api/v1/stage1/trade-control').then(setPaperControl).catch(()=>setPaperControl(null));
-    get<{items:Approval[]}>('/api/v1/stage1/approvals').then(r=>setApprovals(r.items)).catch(()=>{});}
-  async function togglePaper(paused:boolean){setPaperControl(null);
+  async function reloadControls(){
+    const epoch=++controlsEpoch.current;
+    setPaperControl(null);setPaperReadiness(null);setApprovals([]);
+    get<{paused:boolean;reason:string}>('/api/v1/stage1/trade-control')
+      .then(x=>{if(epoch===controlsEpoch.current)setPaperControl(x);})
+      .catch(()=>{if(epoch===controlsEpoch.current)setPaperControl(null);});
+    get<PaperReadiness>('/api/v1/stage1/paper-execution-readiness')
+      .then(x=>{if(epoch===controlsEpoch.current)setPaperReadiness(x);})
+      .catch(()=>{if(epoch===controlsEpoch.current)setPaperReadiness(null);});
+    get<{items:Approval[]}>('/api/v1/stage1/approvals')
+      .then(r=>{if(epoch===controlsEpoch.current)setApprovals(r.items);})
+      .catch(()=>{if(epoch===controlsEpoch.current)setApprovals([]);});
+  }
+  async function togglePaper(paused:boolean){
+    ++controlsEpoch.current;setPaperControl(null);setPaperReadiness(null);
     await action(async()=>{setPaperControl(await post('/api/v1/stage1/trade-control',{paused,reason:paused?'사용자 긴급 중지':'사용자 가상운용 허용'}));},
-    paused?'모의투자 자동 주문을 중지했습니다.':'가상 투자 검토를 허용했습니다.');}
+    paused?'모의투자 자동 주문을 중지했습니다.':'가상 투자 검토를 허용했습니다.');
+    void reloadControls();
+  }
   async function executeApprovedOrder(a:Approval){
     if(approvalExecuteLock.current)return;
     approvalExecuteLock.current=true;
     setBusy(true);setError('');setNotice('');
     try{
-      if(paperControl?.paused!==false || !releaseAudit ||
+      if(paperControl?.paused!==false || paperReadiness?.verified!==true || !releaseAudit ||
          releaseAudit.blocking_count!==0 ||
          releaseAudit.paper_execution_permitted_by_integrity!==true)
         throw Error('가상거래 중지 또는 원장 감사가 미확인입니다. 실행을 보류합니다.');
       // Server-side checks are authoritative: refresh state before submitting a
       // user-initiated PAPER order; never rely on a stale approved UI row.
-      const [control,audit,latest]=await Promise.all([
+      const [control,audit,latest,readiness]=await Promise.all([
         get<{paused:boolean;reason:string}>('/api/v1/stage1/trade-control'),
         get<ReleaseAudit>('/api/v1/stage1/release-integrity'),
-        get<{items:Approval[]}>('/api/v1/stage1/approvals')
+        get<{items:Approval[]}>('/api/v1/stage1/approvals'),
+        get<PaperReadiness>('/api/v1/stage1/paper-execution-readiness')
       ]);
-      setPaperControl(control);setReleaseAudit(audit);setApprovals(latest.items);
+      setPaperControl(control);setReleaseAudit(audit);setApprovals(latest.items);setPaperReadiness(readiness);
       const fresh=latest.items.find(x=>x.request_id===a.request_id);
-      if(control.paused || audit.blocking_count!==0 ||
+      if(control.paused || readiness.verified!==true || audit.blocking_count!==0 ||
          audit.paper_execution_permitted_by_integrity!==true ||
          !fresh || fresh.status!=='APPROVED' || fresh.executed ||
          fresh.needs_reconciliation ||
@@ -230,7 +260,7 @@ export function Stage1Page(){
       <p className="s1-desc">전체 가상자산, 미국/한국 및 ETF/개별주 목표 비중, 8전략 정량점수, 현금유보·집중위험을 하나의 주문계획으로 평가합니다. 수집 자료는 연구용이며 실제 주문 전에 공개 종가·환율을 별도로 재검증합니다.</p>
       <div className="s1-balances">
         <div><small>가상자산 평가</small><strong>{stage4Plan?.portfolio_value_krw?'₩ '+money(stage4Plan.portfolio_value_krw):'자료 부족'}</strong></div>
-        <div><small>당일 매수 검토 한도</small><strong>{stage4Plan?.daily_spend_cap_krw?'₩ '+money(stage4Plan.daily_spend_cap_krw):'검증 대기'}</strong></div>
+        <div><small>Stage4 계획 예산 · 통합 20% 한도 아님</small><strong>{stage4Plan?.daily_spend_cap_krw?'₩ '+money(stage4Plan.daily_spend_cap_krw):'검증 대기'}</strong></div>
         <div><small>계획 상태</small><strong>{stage4Plan?.status==='ready'?'평가 가능':stage4Plan?.reason??'조회 중'}</strong></div>
       </div>
       {stage4Plan?.data_errors.length?<p className="s1-desc">미확인 자료: {stage4Plan.data_errors.join(' · ')}</p>:null}
@@ -251,11 +281,12 @@ export function Stage1Page(){
       {stage4Plan?.review.slice(0,10).map((r,i)=><p className="s1-desc" key={i}>
         {r.symbol} · {r.account} · {r.reason}{r.approval_required?' · 자동체결 금지 / 별도 승인 필요':''}
       </p>)}
-      <button className="s1-primary" disabled={busy||paperControl?.paused||releaseAudit?.status==='blocked'||!releaseAudit||!stage4Plan?.trade_enabled||stage4Plan?.status!=='ready'||!stage4Plan?.proposed_orders.length}
+      <button className="s1-primary" disabled={busy||!paperMayExecute(paperControl?.paused)||!releaseAudit||releaseAudit.blocking_count!==0||releaseAudit.paper_execution_permitted_by_integrity!==true||paperReadiness?.verified!==true||stage4Plan?.turnover_session_verified!==true||!stage4Plan?.trade_enabled||stage4Plan?.status!=='ready'||!stage4Plan?.proposed_orders.length}
         onClick={()=>void runStage4()}>{busy?'검증 중…':'통합 계획으로 가상 모의투자 1회 실행'}</button>
-      <p className="s1-desc">긴급 중지 해제 시에만 실행됩니다. 주문 실행 전 매수가격 편차·원화환산 투자한도·현금유보·중복 요청을 재검증합니다. 30만원 이상 자동체결은 허용하지 않습니다.</p>
+      {(paperControl===null||paperReadiness?.verified!==true)&&<p className="s1-desc" role="status">{paperControl===null?'거래 제어 상태 확인 불가 · 자동 PAPER 실행 보류':paperReadiness?.reason??'검증된 시작 NAV·통합 한도 확인 불가 · 자동 PAPER 실행 보류'}</p>}
+      <p className="s1-desc">긴급 중지 해제뿐 아니라 별도 시장·자산·원장 검증이 모두 완료되어야 실행됩니다. 통합 20% 한도 미검증 시 실제 가상체결은 보류합니다.</p>
       <details><summary>최근 통합 주문 원장 {stage4History.length}건 · 결과 대조</summary>
-        {stage4History.slice(0,20).map(x=><p className="s1-desc" key={x.request_id}>{x.updated_utc} · {x.account} {x.side} {x.symbol} · {x.status} / {x.reason}</p>)}
+        {stage4History.slice(0,20).map(x=><p className="s1-desc" key={x.request_id}>{x.updated_utc} · {x.account} {x.side} {x.symbol} · {stage4ClaimLabel(x)} / {x.reason}</p>)}
       </details>
     </section>
     <section className="s1-panel">
@@ -292,10 +323,11 @@ export function Stage1Page(){
         <article className="s1-candidate" key={a.request_id}>
           <h3>{a.symbol} · {a.side} · {money(a.amount_krw)}원</h3>
           <p>{a.account} / {a.quantity}주 · {approvalStatusKo(a.status,a.executed)} · 요청 유효기한: {a.expires_at}</p><p>{a.rationale}</p>
-          {(paperControl?.paused!==false||!releaseAudit||releaseAudit.blocking_count!==0||
+          {(paperControl?.paused!==false||paperReadiness?.verified!==true||!releaseAudit||releaseAudit.blocking_count!==0||
             a.needs_reconciliation||a.status==='APPROVED'&&Date.parse(a.expires_at)<=Date.now())&&
             <p role="status" className="s1-desc">실행 제한: {a.needs_reconciliation?'승인·원장 불일치 · 원장 대조 필요':
               paperControl?.paused!==false?'PAPER 사용자 중지 또는 상태 미확인':
+              paperReadiness?.verified!==true?'시작 NAV 및 통합 20% 한도 검증 대기':
               !releaseAudit||releaseAudit.blocking_count!==0?'원장 무결성 감사 미확인 또는 차단':
               '요청 유효기간 만료'} · 승인 기록만으로 가상체결은 완료되지 않습니다.</p>}
           {a.needs_reconciliation&&<p role="alert">거래 기록 불일치: 승인 실행을 중단했습니다. 원장 대조가 필요합니다.</p>}
@@ -304,7 +336,7 @@ export function Stage1Page(){
               <button className="s1-outline" disabled={busy} onClick={()=>void decideApproval(a.request_id,false)}>거절</button>
               <button className="s1-primary" disabled={busy||a.needs_reconciliation} onClick={()=>void decideApproval(a.request_id,true)}>승인 기록</button>
             </>:<button type="button" className="s1-primary"
-                disabled={busy||paperControl?.paused!==false||
+                disabled={busy||paperControl?.paused!==false||paperReadiness?.verified!==true||
                   !releaseAudit||releaseAudit.blocking_count!==0||
                   releaseAudit.paper_execution_permitted_by_integrity!==true||
                   a.status!=='APPROVED'||a.executed||a.needs_reconciliation||
@@ -315,8 +347,8 @@ export function Stage1Page(){
         </article>)}
             {!approvals.some(a=>(a.status==='PENDING'||a.status==='APPROVED')&&!a.executed)&&<p className="s1-empty">승인 대기 중인 주문이 없습니다.</p>}
     </section>
-    <section className="s1-panel"><div className="s1-panelhead"><h2>자동 가상투자 운용</h2><span>{paperControl?.paused?'거래 중지':
-  auto?.enabled?'서버 실행 · 위험기준 검토 중':'서버 검토 대기'}</span></div>
+    <section className="s1-panel"><div className="s1-panelhead"><h2>자동 가상투자 운용</h2><span>{paperControl===null?'거래 제어 상태 확인 불가 · 자동 PAPER 실행 보류':paperControl.paused?'거래 중지':
+  auto?.enabled?'서버 검사 실행 중 · 체결 허가 별도':'서버 검토 대기 · 체결 허가 별도'}</span></div>
       <p className="s1-desc">서버 가동 중 약 1시간마다 지연 시세를 확인합니다. 검증되지 않은 주문은 건너뜁니다.</p>
       <p className="s1-desc">최근 검사: {auto?.last_checked_at??'대기 중'} · 결과: {auto?.last_result.status??'대기'} {auto?.last_result.reason??''}</p>
       {auto?.last_result.us_stocks&&<p className="s1-desc">미국 개별주: {auto.last_result.us_stocks.status} · {auto.last_result.us_stocks.symbol??''} {auto.last_result.us_stocks.reason??''}</p>}
@@ -378,13 +410,13 @@ export function Stage1Page(){
       <p className="s1-desc">서버가 실행 중이면 16시 이후 한 번 자동 저장을 시도합니다. 자료가 없던 과거 날짜의 자산이나 수익률을 임의로 생성하지 않습니다.</p>
     </section>
     <section className="s1-panel"><div className="s1-panelhead"><h2>전체 가상 포트폴리오 성과</h2><span>{performance?.complete?'검증된 지연 종가 기준':'가격·환율 추가 확인 필요'}</span></div>
-      <div className="s1-balances"><div><small>누적 투자원금</small><strong>₩ {money(performance?.contributions_krw??fund?.initial_krw??4000000)}</strong></div><div><small>총 자산 평가</small><strong>{performance?.complete?'₩ '+money(performance.portfolio_value_krw??'0'):'미확정'}</strong></div><div><small>원금 대비 수익률</small><strong>{performance?.complete?Number(performance.return_pct).toFixed(2)+'%':'미확정'}</strong></div></div>
+      <div className="s1-balances"><div><small>누적 투자원금</small><strong>{performance?.contributions_krw!=null?'₩ '+money(performance.contributions_krw):'검증 대기'}</strong></div><div><small>총 자산 평가</small><strong>{performance?.complete?'₩ '+money(performance.portfolio_value_krw??'0'):'미확정'}</strong></div><div><small>원금 대비 수익률</small><strong>{performance?.complete?Number(performance.return_pct).toFixed(2)+'%':'미확정'}</strong></div></div>
       {performance?.missing?.length? <p className="s1-desc">시세 누락: {performance.missing.map(x=>x.symbol).join(', ')} · 가격 미확인 종목은 임의 평가하지 않습니다.</p>:null}
       <p className="s1-desc">입금은 투자 수익에서 제외합니다. 거래비용·세금·배당금 정산은 아직 반영되지 않았습니다.</p></section>
     <div className="s1-stats">
       <div className="s1-tile"><small>전체 가상 원화 현금</small><strong>₩ {money(displayValue)}</strong><span>계좌 {accounts.length}개 합계</span></div>
       <div className="s1-tile"><small>가상 달러 현금</small><strong>$ {money(accounts.reduce((v,a)=>v+Number(a.usd_cash),0))}</strong><span>미국 주식 모의매수에 사용</span></div>
-      <div className="s1-tile"><small>매월 자동 적립</small><strong>₩ {money(fund?.monthly_krw??350000)}</strong><span>매월 {fund?.deposit_day??25}일 · 최초 입금 400만원</span></div>
+      <div className="s1-tile"><small>설정된 매월 적립(계획)</small><strong>₩ {money(fund?.monthly_krw??350000)}</strong><span>매월 {fund?.deposit_day??25}일 · 계획 시작금 400만원(실제 입금 원장 별도 확인)</span></div>
       <div className="s1-tile"><small>지연 기준환율 USD/KRW</small><strong>{fx?.status==='ok'?`₩ ${money(fx.usd_krw??'0')}`:'조회 불가'}</strong><span>{fx?.as_of??'시세 검증 대기'} · 실거래 호가 아님</span></div>
     </div>
     <div className="s1-tabs">{([['discover','ETF·종목 후보'],['overview','계좌 관리'],['history','거래 내역'],['reports','자동 보고서'],['news','시장 뉴스']] as const).map(([id,label])=><button key={id} type="button" className={section===id?'selected':''} onClick={()=>setSection(id)}>{label}</button>)}</div>

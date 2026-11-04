@@ -1,7 +1,11 @@
 import {describe,expect,it} from 'vitest';
-import {paperControlDisplay} from './paperControlDisplay';
+import {paperControlDisplay,paperMayExecute} from './paperControlDisplay';
 
 describe('PAPER user stop/resume status is always truthful',()=>{
+  it('allows execution only on explicit server false, never null/undefined',()=>{
+    expect(paperMayExecute(false)).toBe(true);
+    for(const value of [true,null,undefined])expect(paperMayExecute(value)).toBe(false);
+  });
   it('does not show allowed when state is unknown or server fetch failed',()=>{
     const state=paperControlDisplay(null);
     expect(state.label).toContain('상태 확인 불가');

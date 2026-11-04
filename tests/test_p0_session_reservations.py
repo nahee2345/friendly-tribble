@@ -222,6 +222,10 @@ def integrated_store(tmp_path):
             start_utc=(moment-timedelta(hours=1)).isoformat(),
             end_utc=(moment+timedelta(hours=1)).isoformat())
         db.execute("COMMIT")
+    # Legacy opt-in fixture must EXPLICITLY enable its ephemeral owner.
+    # Missing trade-control is no longer treated as an allow decision.
+    from wealthy_server.stage1_controls import set_paused
+    set_paused(OWNER,p,False,"isolated NAV reservation test only")
     quote={"symbol":"069500","status":"ok","tradeable":True,
            "currency":"KRW","price":"200000",
            "source":"isolated-fixture","as_of":day}

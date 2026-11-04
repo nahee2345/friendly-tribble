@@ -54,11 +54,20 @@ class Portfolios:
 
     @staticmethod
     def _assert_not_paused(db,owner):
-        table=db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='stage1_trade_control'").fetchone()
-        if table:
-            row=db.execute("SELECT paused FROM stage1_trade_control WHERE owner=?",(owner,)).fetchone()
-            if row and row[0]:
-                raise ValueError('긴급 중지 중에는 가상 주문을 기록할 수 없습니다.')
+        """Fail closed inside the writer transaction unless explicitly resumed.
+
+        A missing control table, missing owner row, invalid paused value, or
+        SQLite lookup failure must never be treated as permission to trade.
+        """
+        try:
+            row=db.execute(
+                "SELECT paused FROM stage1_trade_control WHERE owner=?",
+                (owner,)
+            ).fetchone()
+        except sqlite3.Error as exc:
+            raise ValueError('긴급 중지: PAPER_CONTROL_STATE_UNVERIFIED') from exc
+        if row is None or type(row[0]) is not int or row[0] != 0:
+            raise ValueError('긴급 중지: PAPER_CONTROL_NOT_EXPLICITLY_ENABLED')
 
     @staticmethod
     def _ensure(db,owner):

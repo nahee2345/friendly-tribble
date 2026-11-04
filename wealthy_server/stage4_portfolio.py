@@ -478,6 +478,16 @@ class PortfolioEngine:
         if pause_status(owner,self.portfolios)["paused"]:
             return {"status":"paused","reason":"가상매매 중지 상태",
                     "executed":[],"skipped":[],"simulated_only":True}
+        # P0 runtime barrier. Historic/isolated unit fixtures may still test
+        # the legacy planner, but live Stage4 must not create stale claims or
+        # virtual_orders before opening NAV provenance and owner-wide 20%
+        # reservations are integrated into ONE writer transaction.
+        from .p0_paper_execution_readiness import paper_execution_readiness
+        readiness=paper_execution_readiness()
+        if not readiness["verified"]:
+            return {"status":"session_unverified",
+                    "reason":readiness["reason"],"executed":[],"skipped":[],
+                    "simulated_only":True,"trade_enabled":False}
         # Stage7: a read-only cross-table preflight precedes each unattended
         # paper fill. A corrupt order, interrupted claim or invalid historic
         # cash cannot be paper-traded through. No automatic data rewriting.
