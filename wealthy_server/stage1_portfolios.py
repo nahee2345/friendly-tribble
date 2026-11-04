@@ -130,8 +130,26 @@ class Portfolios:
             db.execute('COMMIT')
         return self.list(owner)
 
-    def auto_buy_usd_with_fx(self, owner, symbol, quote, rate, request_id):
-        """Atomically convert virtual KRW and buy one USD share; never strand FX."""
+    def auto_buy_usd_with_fx(self, owner, symbol, quote, rate, request_id, *,
+                             verified_turnover_session_date=None,
+                             verified_fx_evidence=None, now=None):
+        """Atomic USD FX + one PAPER share, including the optional P0 session gate.
+
+        Runtime Stage4 uses verified_turnover_session_date and source evidence.
+        The old signature remains only for historical isolated fixture replay;
+        every authenticated runtime entry is guarded by the release barrier.
+        """
+        if verified_turnover_session_date is not None:
+            from .stage1_verified_execution import execute_verified_paper
+            if verified_fx_evidence is None:
+                raise ValueError("UNVERIFIED_PAPER_FX")
+            if str(verified_fx_evidence.get("usd_krw")) != str(rate):
+                raise ValueError("FX_EVIDENCE_MISMATCH")
+            return execute_verified_paper(
+                self,owner=owner,account="default",symbol=symbol,side="BUY",
+                quantity=1,request_id=request_id,quote=quote,
+                session_date=verified_turnover_session_date,
+                fx=verified_fx_evidence,auto_fx=True,now=now)
         from decimal import ROUND_UP, ROUND_DOWN
         if not valid_key(request_id) or not SYMBOL.fullmatch(symbol):
             raise ValueError('요청 식별자 오류')
