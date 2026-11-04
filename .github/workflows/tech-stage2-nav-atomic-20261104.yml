@@ -2,6 +2,8 @@ name: Stage2 verified NAV and unified 20pct PAPER atomicity
 on:
   push:
     branches: [tech/stage2-nav-turnover-integration-20261104]
+  pull_request:
+    branches: [tech/stage2-paper-safety-guards-20261104]
   workflow_dispatch:
 permissions:
   contents: read
