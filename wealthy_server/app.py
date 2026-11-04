@@ -555,6 +555,13 @@ def create_app(
                 raise _error(500, "PAPER_BACKUP_FAILED",
                              "가상계좌 온라인 백업 무결성 또는 저장 경로 검사에 실패했습니다.") from None
 
+        @app.get("/api/v1/stage1/paper-execution-readiness")
+        def stage1_paper_execution_readiness(
+                actor: Actor = Depends(current_actor)) -> dict[str, Any]:
+            # Read-only reason/status; never grants execution from UI alone.
+            from .p0_paper_execution_readiness import paper_execution_readiness
+            return paper_execution_readiness()
+
         @app.get("/api/v1/stage1/trade-control")
         def stage1_trade_control(actor: Actor = Depends(current_actor)) -> dict[str, Any]:
             from .stage1_controls import status
