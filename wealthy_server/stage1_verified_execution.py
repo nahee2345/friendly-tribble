@@ -170,6 +170,24 @@ def execute_verified_paper(
             elif cash_usd<price*quantity:
                 raise ValueError("INSUFFICIENT_USD_CASH")
         if stage4_plan is not None:
+            # Do not trust a plan constructed before a concurrent preference
+            # or strategy change; the same writer rechecks both revisions.
+            prefs=stage4_plan.get("policy_prefs",{})
+            weights=stage4_plan.get("policy_weights",{})
+            if not isinstance(prefs,dict) or not isinstance(weights,dict):
+                raise ValueError("STAGE4_POLICY_EVIDENCE_MISSING")
+            row_p=db.execute("""SELECT us_weight,etf_weight
+                     FROM stage1_preferences WHERE owner=?""",(owner,)).fetchone()
+            actual_p=row_p if row_p else (90,80)
+            if actual_p != (prefs.get("us_weight"),prefs.get("etf_weight")):
+                raise ValueError("STAGE4_PREFERENCES_CHANGED")
+            from .stage1_strategy_policy import DEFAULT_WEIGHTS
+            actual_weights=dict(db.execute("""SELECT strategy,weight
+                      FROM stage1_strategy_weights WHERE owner=?""",
+                      (owner,)).fetchall())
+            if not actual_weights: actual_weights=DEFAULT_WEIGHTS.copy()
+            if actual_weights != weights:
+                raise ValueError("STAGE4_STRATEGY_CHANGED")
             # Stage4 5% BUY-only cap stays an *additional* conservative limit
             # beside the owner-wide 20% BUY+SELL cap; never replaces it.
             if (not isinstance(stage4_plan,dict) or not isinstance(stage4_plan.get("plan_hash"),str)
@@ -177,12 +195,6 @@ def execute_verified_paper(
                 or notional>MAX_STAGE4_ORDER):
                 raise ValueError("STAGE4_PLAN_INVALID_OR_ORDER_LIMIT")
             if side=="BUY":
-                already=db.execute("""SELECT COALESCE(SUM(CAST(gross_krw AS REAL)),0)
-                       FROM stage1_turnover_claims WHERE owner=? AND session_date=?
-                       AND side='BUY' AND state IN ('PENDING','RESERVED','UNKNOWN','FILLED')""",
-                       (owner,session_date)).fetchone()[0]
-                # SQLite REAL is only used as conservative precheck; precise
-                # Decimal summation is the authoritative decision below.
                 rows=db.execute("""SELECT gross_krw FROM stage1_turnover_claims
                         WHERE owner=? AND session_date=? AND side='BUY'
                         AND state IN ('PENDING','RESERVED','UNKNOWN','FILLED')""",
@@ -192,6 +204,25 @@ def execute_verified_paper(
                 allowed=min(Decimal(proof["nav_krw"])*STAGE4_DAY_BUY,plan_max)
                 if buy_used+notional>allowed:
                     raise ValueError("STAGE4_5_PERCENT_CAP_EXCEEDED")
+                reserve_value=Decimal(str(stage4_plan.get("reserve_percent","0")))
+                if not reserve_value.is_finite() or not 0<=reserve_value<=100:
+                    raise ValueError("STAGE4_RESERVE_POLICY_INVALID")
+                reserve_pct=reserve_value/Decimal(100)
+                available=cash_krw+(cash_usd*rate if rate is not None else Decimal(0))
+                if notional>max(Decimal(0),available*(Decimal(1)-reserve_pct)):
+                    raise ValueError("STAGE4_CASH_RESERVE_EXCEEDED")
+            # Preserve Stage4's existing per-symbol concentration guard.
+            if side=="BUY":
+                from .stage4_portfolio import SINGLE_STOCK_CAP,SINGLE_ETF_CAP
+                group=stage4_plan.get("kind")
+                if group not in ("ETF","STOCK"):raise ValueError("STAGE4_KIND_UNVERIFIED")
+                held_now=db.execute("""SELECT COALESCE(SUM(CASE WHEN side='BUY'
+                    THEN quantity ELSE -quantity END),0) FROM virtual_orders
+                    WHERE owner=? AND symbol=?""",(owner,symbol)).fetchone()[0]
+                cap=(SINGLE_ETF_CAP if group=="ETF" else SINGLE_STOCK_CAP)
+                cap*=Decimal(str(stage4_plan.get("portfolio_value_krw")))
+                if (held_now+quantity)*notional/quantity>cap:
+                    raise ValueError("STAGE4_CONCENTRATION_CAP_EXCEEDED")
             old=db.execute("""SELECT 1 FROM stage4_execution_claims
                         WHERE owner=? AND request_id=?""",(owner,request_id)).fetchone() if db.execute(
                         "SELECT name FROM sqlite_master WHERE name='stage4_execution_claims'"
