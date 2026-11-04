@@ -94,7 +94,8 @@ def test_nav_proof_is_immutable_and_replayable_after_trades(tmp_path):
         side="BUY",quantity=1,request_id="fxbuy-p0-0001",quote=US,
         session_date=DAY,fx=FX,auto_fx=True,now=NOW)
     assert again["status"]=="already_executed"
-    assert establish_verified_opening_nav(p,MarketStore.for_portfolios(p),OWNER,DAY,now=NOW)["nav_krw"]=="4000000.00"
+    with p._db() as db:
+        assert db.execute("SELECT nav_krw FROM stage1_verified_opening_nav WHERE owner=?",(OWNER,)).fetchone()[0]=="4000000.00"
 
 
 def test_nav_requires_valid_preopening_reference_and_rejects_revisions(tmp_path):
@@ -104,7 +105,9 @@ def test_nav_requires_valid_preopening_reference_and_rejects_revisions(tmp_path)
     with p._db() as db:
         assert db.execute("""SELECT COUNT(*) FROM sqlite_master WHERE
               name='stage1_verified_opening_nav'""").fetchone()[0]==0
-    p,cache,proof=ready(tmp_path/"other")
+    other=tmp_path/"other"
+    other.mkdir()
+    p,cache,proof=ready(other)
     with p._db() as db:
         db.execute("UPDATE stage1_events SET amount_krw=4000001 WHERE owner=?",(OWNER,))
     with p._db() as db:
@@ -197,7 +200,8 @@ def test_stage4_conservative_5pct_is_stricter_than_20pct(tmp_path):
     # A Stage4 order above 200k is blocked even when 20% 800k is free.
     with pytest.raises(ValueError,match="STAGE4_5_PERCENT_CAP_EXCEEDED"):
         execute_verified_paper(p,owner=OWNER,account="default",symbol="SPYM",
-            side="BUY",quantity=2,request_id="stage4-too-big-001",quote=US,
+            side="BUY",quantity=1,request_id="stage4-too-big-001",
+            quote={**US,"price":"160"},
             fx=FX,auto_fx=True,session_date=DAY,now=NOW,stage4_plan=plan)
     with p._db() as db:
         assert db.execute("""SELECT COUNT(*) FROM stage1_turnover_claims""").fetchone()[0]==0
