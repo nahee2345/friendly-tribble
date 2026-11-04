@@ -158,10 +158,12 @@ def establish_verified_opening_nav(portfolios, market_store, owner, session_date
     with portfolios._db() as db:
         db.execute("BEGIN")
         before = _ledger_state(db, owner, opening)
-        pairs = set()
+        # USD/KRW evidence is required even with zero initial USD holdings:
+        # future USD PAPER execution still needs the same opening-session
+        # reference valuation and must not manufacture a different FX.
+        pairs = {("FX", "USD/KRW")}
         for account in before["scope"]:
             _, usd, holdings, _ = portfolios._money(db, owner, account)
-            if usd: pairs.add(("FX", "USD/KRW"))
             for symbol, qty in holdings.items():
                 if qty < 0: raise ValueError("NEGATIVE_PAPER_HOLDING")
                 if qty: pairs.add(("PRICE", symbol))
