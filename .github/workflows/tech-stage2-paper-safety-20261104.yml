@@ -28,7 +28,8 @@ jobs:
             tests/test_p0_session_reservations.py \
             tests/test_stage1_controls_cards.py \
             tests/test_stage1_us_market_calendar.py \
-            tests/test_qa_p0_api_ledger.py::test_http_order_refuses_unverified_opening_nav_without_any_order
+            tests/test_qa_p0_api_ledger.py::test_http_order_refuses_unverified_opening_nav_without_any_order \
+            tests/test_qa_p0_api_ledger.py::test_authenticated_paper_readiness_endpoint_is_unverified
   frontend-null-and-build:
     runs-on: ubuntu-latest
     timeout-minutes: 25
