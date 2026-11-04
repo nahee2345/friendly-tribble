@@ -122,6 +122,9 @@ export function Stage1Page(){
   const approvalExecuteLock=useRef(false);
   type Approval={request_id:string;account:string;symbol:string;side:string;quantity:number;amount_krw:number;rationale:string;status:string;expires_at:string;executed:boolean;needs_reconciliation?:boolean};
   const [paperControl,setPaperControl]=useState<{paused:boolean;reason:string}|null>(null);
+  type PaperReadiness={verified:boolean;code:string;reason:string};
+  const [paperReadiness,setPaperReadiness]=useState<PaperReadiness|null>(null);
+  const controlsEpoch=useRef(0);
   type InboxMessage={event_id:string;title:string;detail:string;created_at:string;read_at:string|null};
   const [inboxItems,setInboxItems]=useState<InboxMessage[]>([]);
   const [unreadCount,setUnreadCount]=useState(0);
@@ -158,31 +161,45 @@ export function Stage1Page(){
   async function createPaperBackup(){await action(async()=>{await post('/api/v1/stage1/backups',{});await reloadBackups();},'가상 원장 백업과 무결성 검사가 완료되었습니다.');}
 
   const [approvals,setApprovals]=useState<Approval[]>([]);
-  async function reloadControls(){setPaperControl(null);
-    get<{paused:boolean;reason:string}>('/api/v1/stage1/trade-control').then(setPaperControl).catch(()=>setPaperControl(null));
-    get<{items:Approval[]}>('/api/v1/stage1/approvals').then(r=>setApprovals(r.items)).catch(()=>{});}
-  async function togglePaper(paused:boolean){setPaperControl(null);
+  async function reloadControls(){
+    const epoch=++controlsEpoch.current;
+    setPaperControl(null);setPaperReadiness(null);setApprovals([]);
+    get<{paused:boolean;reason:string}>('/api/v1/stage1/trade-control')
+      .then(x=>{if(epoch===controlsEpoch.current)setPaperControl(x);})
+      .catch(()=>{if(epoch===controlsEpoch.current)setPaperControl(null);});
+    get<PaperReadiness>('/api/v1/stage1/paper-execution-readiness')
+      .then(x=>{if(epoch===controlsEpoch.current)setPaperReadiness(x);})
+      .catch(()=>{if(epoch===controlsEpoch.current)setPaperReadiness(null);});
+    get<{items:Approval[]}>('/api/v1/stage1/approvals')
+      .then(r=>{if(epoch===controlsEpoch.current)setApprovals(r.items);})
+      .catch(()=>{if(epoch===controlsEpoch.current)setApprovals([]);});
+  }
+  async function togglePaper(paused:boolean){
+    ++controlsEpoch.current;setPaperControl(null);setPaperReadiness(null);
     await action(async()=>{setPaperControl(await post('/api/v1/stage1/trade-control',{paused,reason:paused?'사용자 긴급 중지':'사용자 가상운용 허용'}));},
-    paused?'모의투자 자동 주문을 중지했습니다.':'가상 투자 검토를 허용했습니다.');}
+    paused?'모의투자 자동 주문을 중지했습니다.':'가상 투자 검토를 허용했습니다.');
+    void reloadControls();
+  }
   async function executeApprovedOrder(a:Approval){
     if(approvalExecuteLock.current)return;
     approvalExecuteLock.current=true;
     setBusy(true);setError('');setNotice('');
     try{
-      if(paperControl?.paused!==false || !releaseAudit ||
+      if(paperControl?.paused!==false || paperReadiness?.verified!==true || !releaseAudit ||
          releaseAudit.blocking_count!==0 ||
          releaseAudit.paper_execution_permitted_by_integrity!==true)
         throw Error('가상거래 중지 또는 원장 감사가 미확인입니다. 실행을 보류합니다.');
       // Server-side checks are authoritative: refresh state before submitting a
       // user-initiated PAPER order; never rely on a stale approved UI row.
-      const [control,audit,latest]=await Promise.all([
+      const [control,audit,latest,readiness]=await Promise.all([
         get<{paused:boolean;reason:string}>('/api/v1/stage1/trade-control'),
         get<ReleaseAudit>('/api/v1/stage1/release-integrity'),
-        get<{items:Approval[]}>('/api/v1/stage1/approvals')
+        get<{items:Approval[]}>('/api/v1/stage1/approvals'),
+        get<PaperReadiness>('/api/v1/stage1/paper-execution-readiness')
       ]);
-      setPaperControl(control);setReleaseAudit(audit);setApprovals(latest.items);
+      setPaperControl(control);setReleaseAudit(audit);setApprovals(latest.items);setPaperReadiness(readiness);
       const fresh=latest.items.find(x=>x.request_id===a.request_id);
-      if(control.paused || audit.blocking_count!==0 ||
+      if(control.paused || readiness.verified!==true || audit.blocking_count!==0 ||
          audit.paper_execution_permitted_by_integrity!==true ||
          !fresh || fresh.status!=='APPROVED' || fresh.executed ||
          fresh.needs_reconciliation ||
@@ -264,9 +281,9 @@ export function Stage1Page(){
       {stage4Plan?.review.slice(0,10).map((r,i)=><p className="s1-desc" key={i}>
         {r.symbol} · {r.account} · {r.reason}{r.approval_required?' · 자동체결 금지 / 별도 승인 필요':''}
       </p>)}
-      <button className="s1-primary" disabled={busy||!paperMayExecute(paperControl?.paused)||!releaseAudit||releaseAudit.blocking_count!==0||releaseAudit.paper_execution_permitted_by_integrity!==true||stage4Plan?.turnover_session_verified!==true||!stage4Plan?.trade_enabled||stage4Plan?.status!=='ready'||!stage4Plan?.proposed_orders.length}
+      <button className="s1-primary" disabled={busy||!paperMayExecute(paperControl?.paused)||!releaseAudit||releaseAudit.blocking_count!==0||releaseAudit.paper_execution_permitted_by_integrity!==true||paperReadiness?.verified!==true||stage4Plan?.turnover_session_verified!==true||!stage4Plan?.trade_enabled||stage4Plan?.status!=='ready'||!stage4Plan?.proposed_orders.length}
         onClick={()=>void runStage4()}>{busy?'검증 중…':'통합 계획으로 가상 모의투자 1회 실행'}</button>
-      {paperControl===null&&<p className="s1-desc" role="status">거래 제어 상태 확인 불가 · 자동 PAPER 실행 보류</p>}
+      {(paperControl===null||paperReadiness?.verified!==true)&&<p className="s1-desc" role="status">{paperControl===null?'거래 제어 상태 확인 불가 · 자동 PAPER 실행 보류':paperReadiness?.reason??'검증된 시작 NAV·통합 한도 확인 불가 · 자동 PAPER 실행 보류'}</p>}
       <p className="s1-desc">긴급 중지 해제뿐 아니라 별도 시장·자산·원장 검증이 모두 완료되어야 실행됩니다. 통합 20% 한도 미검증 시 실제 가상체결은 보류합니다.</p>
       <details><summary>최근 통합 주문 원장 {stage4History.length}건 · 결과 대조</summary>
         {stage4History.slice(0,20).map(x=><p className="s1-desc" key={x.request_id}>{x.updated_utc} · {x.account} {x.side} {x.symbol} · {stage4ClaimLabel(x)} / {x.reason}</p>)}
@@ -306,10 +323,11 @@ export function Stage1Page(){
         <article className="s1-candidate" key={a.request_id}>
           <h3>{a.symbol} · {a.side} · {money(a.amount_krw)}원</h3>
           <p>{a.account} / {a.quantity}주 · {approvalStatusKo(a.status,a.executed)} · 요청 유효기한: {a.expires_at}</p><p>{a.rationale}</p>
-          {(paperControl?.paused!==false||!releaseAudit||releaseAudit.blocking_count!==0||
+          {(paperControl?.paused!==false||paperReadiness?.verified!==true||!releaseAudit||releaseAudit.blocking_count!==0||
             a.needs_reconciliation||a.status==='APPROVED'&&Date.parse(a.expires_at)<=Date.now())&&
             <p role="status" className="s1-desc">실행 제한: {a.needs_reconciliation?'승인·원장 불일치 · 원장 대조 필요':
               paperControl?.paused!==false?'PAPER 사용자 중지 또는 상태 미확인':
+              paperReadiness?.verified!==true?'시작 NAV 및 통합 20% 한도 검증 대기':
               !releaseAudit||releaseAudit.blocking_count!==0?'원장 무결성 감사 미확인 또는 차단':
               '요청 유효기간 만료'} · 승인 기록만으로 가상체결은 완료되지 않습니다.</p>}
           {a.needs_reconciliation&&<p role="alert">거래 기록 불일치: 승인 실행을 중단했습니다. 원장 대조가 필요합니다.</p>}
@@ -318,7 +336,7 @@ export function Stage1Page(){
               <button className="s1-outline" disabled={busy} onClick={()=>void decideApproval(a.request_id,false)}>거절</button>
               <button className="s1-primary" disabled={busy||a.needs_reconciliation} onClick={()=>void decideApproval(a.request_id,true)}>승인 기록</button>
             </>:<button type="button" className="s1-primary"
-                disabled={busy||paperControl?.paused!==false||
+                disabled={busy||paperControl?.paused!==false||paperReadiness?.verified!==true||
                   !releaseAudit||releaseAudit.blocking_count!==0||
                   releaseAudit.paper_execution_permitted_by_integrity!==true||
                   a.status!=='APPROVED'||a.executed||a.needs_reconciliation||
