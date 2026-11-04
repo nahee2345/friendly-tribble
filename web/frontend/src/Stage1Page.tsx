@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import './stage1.css';
 import {Stage1Dashboard} from './Stage1Dashboard';
-import {paperControlDisplay} from './paperControlDisplay';
+import {paperControlDisplay,paperMayExecute} from './paperControlDisplay';
 
 type A={id:string;name:string;kind:string;krw_cash:string;usd_cash:string;holdings:{symbol:string;quantity:number}[];trades:number};
 type PlannedOrder={request_id:string;side:'BUY'|'SELL';account:string;symbol:string;quantity:number;kind:string;market:string;planned_price:string;notional_krw:string;strategy_score:number|null;coverage_pct:number;reason:string};
@@ -264,7 +264,7 @@ export function Stage1Page(){
       {stage4Plan?.review.slice(0,10).map((r,i)=><p className="s1-desc" key={i}>
         {r.symbol} · {r.account} · {r.reason}{r.approval_required?' · 자동체결 금지 / 별도 승인 필요':''}
       </p>)}
-      <button className="s1-primary" disabled={busy||paperControl?.paused!==false||!releaseAudit||releaseAudit.blocking_count!==0||releaseAudit.paper_execution_permitted_by_integrity!==true||!stage4Plan?.trade_enabled||stage4Plan?.status!=='ready'||!stage4Plan?.proposed_orders.length}
+      <button className="s1-primary" disabled={busy||!paperMayExecute(paperControl?.paused)||!releaseAudit||releaseAudit.blocking_count!==0||releaseAudit.paper_execution_permitted_by_integrity!==true||!stage4Plan?.trade_enabled||stage4Plan?.status!=='ready'||!stage4Plan?.proposed_orders.length}
         onClick={()=>void runStage4()}>{busy?'검증 중…':'통합 계획으로 가상 모의투자 1회 실행'}</button>
       {paperControl===null&&<p className="s1-desc" role="status">거래 제어 상태 확인 불가 · 자동 PAPER 실행 보류</p>}
       <p className="s1-desc">긴급 중지 해제뿐 아니라 별도 시장·자산·원장 검증이 모두 완료되어야 실행됩니다. 통합 20% 한도 미검증 시 실제 가상체결은 보류합니다.</p>
