@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone, date, timedelta
 from decimal import Decimal, ROUND_DOWN, ROUND_UP, InvalidOperation
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, parse_qs, unquote
 
 from .stage1_nav_proof import assert_verified_opening_nav
 from .stage1_turnover_reservations import reserve, mark_filled
@@ -38,10 +38,21 @@ def _verified_quote(quote, symbol, now):
         raise ValueError("UNVERIFIED_EXECUTION_QUOTE")
     # Execution references can only come from the established, bounded
     # public providers, not an arbitrary caller-provided URL.
-    host=urlsplit(quote["source_url"]).hostname
-    if (urlsplit(quote["source_url"]).scheme!="https" or
-        host not in {"stooq.com","query1.finance.yahoo.com","query2.finance.yahoo.com"}):
+    url=urlsplit(quote["source_url"])
+    host=url.hostname
+    if (url.scheme!="https" or url.username or url.password or url.port is not None
+        or host not in {"stooq.com","query1.finance.yahoo.com","query2.finance.yahoo.com"}):
         raise ValueError("UNVERIFIED_EXECUTION_SOURCE")
+    if host=="stooq.com":
+        query=parse_qs(url.query)
+        if (symbol.isdigit() or not url.path.endswith("/q/d/l/")
+            or query.get("s")!=[symbol.lower()+".us"] or query.get("i")!=["d"]):
+            raise ValueError("EXECUTION_SOURCE_INSTRUMENT_MISMATCH")
+    else:
+        terminal=unquote(url.path.rsplit("/",1)[-1]).upper()
+        accepted=(symbol+".KS",symbol+".KQ") if symbol.isdigit() else (symbol,)
+        if terminal not in accepted:
+            raise ValueError("EXECUTION_SOURCE_INSTRUMENT_MISMATCH")
     try:
         day=date.fromisoformat(quote["as_of"])
     except (TypeError, ValueError, KeyError) as exc:
