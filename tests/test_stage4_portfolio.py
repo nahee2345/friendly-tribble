@@ -145,6 +145,7 @@ def test_missing_fx_entire_global_plan_blocks_and_no_provider_call(tmp_path):
 
 def test_missing_held_security_price_blocks_buy_until_valued(tmp_path):
     ledger,p,prefs,policy,cache,engine=setup(tmp_path)
+    set_paused("owner",p,False,"isolated stage4 preexisting position fixture")
     make_symbol(cache,"VOO",80)
     p.trade("owner","kr-base","005930","BUY",1,"historic-kr-buy-01",
             quote("005930",20000))
@@ -171,6 +172,7 @@ def test_domestic_isa_routing_only_for_approved_etf(tmp_path):
 
 def test_stop_loss_review_and_sell_stops_same_sleeve_reentry(tmp_path):
     ledger,p,prefs,policy,cache,engine=setup(tmp_path,us=0,etf=100,with_fx=False)
+    set_paused("owner",p,False,"isolated stage4 preexisting position fixture")
     p.trade("owner","kr-base","069500","BUY",1,"oldbuy-00001",
             quote("069500",10000))
     make_symbol(cache,"069500",8800)
@@ -190,6 +192,7 @@ def test_stop_loss_review_and_sell_stops_same_sleeve_reentry(tmp_path):
 
 def test_sell_notional_above_300k_requires_approval_not_auto_fill(tmp_path):
     ledger,p,prefs,policy,cache,engine=setup(tmp_path,us=0,etf=100,with_fx=False)
+    set_paused("owner",p,False,"isolated stage4 preexisting position fixture")
     p.trade("owner","kr-base","069500","BUY",40,"oldbuy-00001",
             quote("069500",10000))
     make_symbol(cache,"069500",8500)
@@ -207,6 +210,7 @@ def test_sell_notional_above_300k_requires_approval_not_auto_fill(tmp_path):
 
 def test_unknown_held_security_prevents_guessing_market_exposure(tmp_path):
     ledger,p,prefs,policy,cache,engine=setup(tmp_path)
+    set_paused("owner",p,False,"isolated stage4 preexisting position fixture")
     p.auto_buy_usd_with_fx("owner","TSLA",quote("TSLA",10),"1400","unknown-001")
     make_symbol(cache,"VOO",80)
     plan=engine.preview("owner",now=NOW)
@@ -286,6 +290,7 @@ def test_external_paper_emergency_pause_at_execution_boundary(tmp_path):
 
 def test_legacy_manual_buy_consume_same_day_portfolio_spending_budget(tmp_path):
     ledger,p,prefs,policy,cache,engine=setup(tmp_path)
+    set_paused("owner",p,False,"isolated stage4 preexisting position fixture")
     make_symbol(cache,"VOO",80)
     add(cache,"PRICE","005930",quote("005930",150000))
     p.trade("owner","kr-base","005930","BUY",1,"manual-order-001",
