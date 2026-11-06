@@ -9,7 +9,7 @@ from wealthy_server.stage1_paper import Stage1Ledger
 from test_qa_p0_api_ledger import local_api
 
 
-def test_two_real_login_sessions_cannot_read_each_others_paper_orders(local_api):
+def test_local_runtime_blocks_second_user_login_and_existing_session(local_api):
     first_client, _, paper, app, _, _, _, _, _, owner_a = local_api
     initialize_paper_accounts(
         owner_a, Stage1Ledger(paper.path), paper,
@@ -36,19 +36,20 @@ def test_two_real_login_sessions_cannot_read_each_others_paper_orders(local_api)
             "/api/v1/login", headers={"Origin": "http://localhost"},
             json={"username": "qa-isolated-second",
                   "password": password_b})
-        assert response.status_code == 200, response.text
+        assert response.status_code == 400, response.text
+        assert '로컬 사용자 상태를 확인할 수 없습니다' in response.text
         second_view = second_client.get(
             "/api/v1/stage1/portfolios/kr-base/orders")
-        assert second_view.status_code in (200, 404), second_view.text
+        assert second_view.status_code in (400, 401, 403), second_view.text
         assert key not in second_view.text
         with paper._db() as db:
             assert db.execute(
                 "SELECT COUNT(*) FROM virtual_orders WHERE owner=?",
                 (user_b.id,)).fetchone()[0] == 0
-        # Logging in as B does not change A's independent cookies or scope.
+        # Machine-wide one-user guard also blocks A once two user rows exist.
         again_a = first_client.get(
             "/api/v1/stage1/portfolios/kr-base/orders")
-        assert again_a.status_code == 200, again_a.text
-        assert key in again_a.text
+        assert again_a.status_code == 400, again_a.text
+        assert key not in again_a.text
     finally:
         second_client.close()
