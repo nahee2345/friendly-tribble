@@ -50,7 +50,7 @@ def _buy(p,key,quantity=30):
 
 def test_logout_protected_api_401_with_stolen_old_session_cookie(local_api):
     client,post,paper,app,*_ = local_api
-    protected="/api/v1/assets"
+    protected="/api/v1/stage1/portfolios"
     before=client.get(protected)
     assert before.status_code == 200,before.text
     old_cookies=dict(client.cookies)
