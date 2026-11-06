@@ -118,6 +118,7 @@ def test_online_sqlite_backup_restore_preserves_claim_and_prevents_replay(tmp_pa
     backup=tmp_path/"qa-backup.sqlite3"
     with sqlite3.connect(p.path) as source,sqlite3.connect(backup) as target:
         source.backup(target)
+    backup.chmod(0o600)  # production file-owner permission check must stay enforced
     restored=Portfolios(backup,require_verified_p0=True)
     assert _counts(restored)==before
     assert _execute(restored,key)["status"]=="already_executed"
@@ -150,4 +151,5 @@ def test_other_owner_cannot_spend_first_users_nav_or_read_orders(tmp_path):
             session_date=fixture.DAY,now=fixture.NOW)
     assert _counts(p)==before
     assert _counts(p,other)=={k:0 for k in before}
-    assert p.orders(other,"default")["orders"]==[]
+    with pytest.raises(ValueError, match="계좌 없음"):
+        p.orders(other,"default")  # no implicit account creation or cross-owner read
