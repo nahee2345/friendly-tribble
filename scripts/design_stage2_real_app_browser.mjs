@@ -62,6 +62,50 @@ const initial = await page.evaluate(async () => {
 });
 assert(initial.status === 200, 'Actual portfolio API did not authenticate');
 observations.push({ test: 'auth-login-and-portfolio', status: 'PASS', data_scope: initial.body?.data_scope, included: initial.body?.total_scope?.included_account_ids ?? [] });
+// Real API↔React scope consistency on the same isolated authenticated session.
+await page.getByRole('status', { name: '투자자산 합계 범위' }).waitFor({ timeout: 15000 });
+const scopeProof = await page.evaluate(() => {
+  const panel = document.querySelector('[aria-label="투자자산 합계 범위"]');
+  const metric = [...document.querySelectorAll('article.metric')].find(node => node.textContent?.includes('투자자산 합계'));
+  return { scopeText: panel?.textContent || '', metricText: metric?.textContent || '', metricStrong: metric?.querySelector('strong')?.textContent || '' };
+});
+assert(scopeProof.scopeText.length > 0, 'Scope banner not visible');
+if (initial.body?.total_scope?.status !== 'LEDGER_COMPLETE' || initial.body?.total_scope?.realm !== initial.body?.data_scope) {
+  assert(scopeProof.scopeText.includes('미검증 · 합계 사용 보류') || scopeProof.scopeText.includes('자료 영역 확인 필요'),
+    'Unverified account scope not explained');
+  assert(!/₩[0-9]/.test(scopeProof.metricStrong), 'Unverified portfolio amount rendered as verified KRW');
+}
+observations.push({test:'real-api-assets-scope-guard',status:'PASS',scope:initial.body?.data_scope,scopeStatus:initial.body?.total_scope?.status,renderedAmount:scopeProof.metricStrong});
+
+// A real authenticated mutation without a CSRF header must be rejected, never
+// represented as an authorized trading-control change.
+const csrfRejection = await page.evaluate(async () => {
+  const response = await fetch('/api/v1/stage1/trade-control', {
+    method: 'POST', credentials: 'same-origin', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({paused:false,reason:'CSRF forbidden design E2E'})
+  });
+  return {status:response.status};
+});
+assert(csrfRejection.status === 403, 'Missing CSRF allowed mutation: HTTP '+csrfRejection.status);
+observations.push({test:'authenticated-mutation-missing-csrf-403',status:'PASS',http:403});
+
+await page.goto(root + '/stage1', { waitUntil:'domcontentloaded' });
+await page.getByRole('heading',{name:'가상 투자 워크스페이스'}).waitFor();
+const readiness = await page.evaluate(async () => {
+  const response = await fetch('/api/v1/stage1/paper-execution-readiness');
+  return {status:response.status, data:response.ok?await response.json():null};
+});
+assert(readiness.status === 200, 'Readiness endpoint unavailable: '+readiness.status);
+if (readiness.data?.verified !== true) {
+  await page.getByRole('button',{name:/통합 계획으로 가상 모의투자 1회 실행/}).waitFor({timeout:20000});
+  assert(await page.getByRole('button',{name:/통합 계획으로 가상 모의투자 1회 실행/}).isDisabled(),
+    'Stage4 execution enabled despite unverified readiness');
+  observations.push({test:'real-nav-unverified-stage4-disabled',status:'PASS',readiness:readiness.data?.verified,code:readiness.data?.code});
+}
+await page.screenshot({path:resolve(out,'stage1-real-readiness.png'),fullPage:true});
+await page.goto(root + '/assets', {waitUntil:'domcontentloaded'});
+await page.getByRole('status', { name: '투자자산 합계 범위' }).waitFor({ timeout: 15000 });
+
 const dimensions = [1366, 1600, 1920];
 const themes = ['light','dark'];
 const zooms = [100,125,150,200];
