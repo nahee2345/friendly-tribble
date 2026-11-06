@@ -1,0 +1,92 @@
+name: Stage2 83-node exact-ref regression triage (no safety override)
+on:
+  push:
+    branches: [tech/stage2-regression-triage-20261106]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  fixed-clock-ref-comparison:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: historical-baseline
+            ref: dc92c6021f1bbd9c71b44c4accdcf0b02c64dd22
+          - label: stage2-pr29
+            ref: 41295d54850c9fc6066c85a6578e0c9bbffe6f0f
+          - label: stage2-pr32
+            ref: eac7d7388e20d8cbb7c06a4e1d2174fc281e6d78
+        clock: ['2026-10-19T10:00:00Z', '2026-11-06T10:00:00Z']
+    name: ${{ matrix.label }} @ ${{ matrix.clock }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install same project dependency constraints and tools
+        run: python -m pip install -e '.[web]' pytest freezegun
+      - name: Freeze exact installed dependency versions
+        run: |
+          mkdir -p triage
+          python -m pip freeze >triage/pip-freeze.txt
+          git rev-parse HEAD >triage/ref.txt
+      - name: Install test-only absolute UTC clock (no application code changes)
+        run: |
+          cat >/tmp/wealthy_qa_fixed_clock.py <<'PY'
+          import os
+          from freezegun import freeze_time
+          _clock = None
+          def pytest_configure(config):
+              global _clock
+              _clock = freeze_time(os.environ['QA_FIXED_CLOCK'], auto_tick_seconds=0.001)
+              _clock.start()
+          def pytest_unconfigure(config):
+              global _clock
+              if _clock is not None:
+                  _clock.stop()
+                  _clock = None
+          PY
+      - name: Enumerate all historical test node IDs, errors, and first root frame
+        env:
+          PYTHONPATH: /tmp
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+          QA_FIXED_CLOCK: ${{ matrix.clock }}
+        run: |
+          set +e
+          python -m pytest -p wealthy_qa_fixed_clock --junitxml=triage/results.xml -q --tb=line \
+            tests/test_stage4_portfolio.py tests/test_stage5_accounting.py \
+            tests/test_stage6_risk.py tests/test_stage7_release.py
+          code=$?
+          set -e
+          python - <<'PY'
+          import json, xml.etree.ElementTree as ET
+          root=ET.parse('triage/results.xml').getroot()
+          results=[]
+          for node in root.iter('testcase'):
+              name=node.attrib.get('classname','')+'::'+node.attrib.get('name','')
+              fail=node.find('failure')
+              if fail is None: fail=node.find('error')
+              skip=node.find('skipped')
+              state='FAIL' if fail is not None else 'SKIP' if skip is not None else 'PASS'
+              body=fail.text or '' if fail is not None else ''
+              results.append({'id':name,'status':state,
+                'error':fail.attrib.get('message','')[:350] if fail is not None else '',
+                'frame':next((l.strip() for l in body.splitlines() if '.py:' in l), '')[:350]})
+          open('triage/nodes.json','w').write(json.dumps(results,ensure_ascii=False,indent=2))
+          print('NODE_RESULT_BEGIN')
+          for value in results: print(json.dumps(value,ensure_ascii=False))
+          print('NODE_RESULT_END')
+          print('TOTAL',len(results),'FAIL',sum(i['status']=='FAIL' for i in results))
+          PY
+          exit "$code"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: regression-${{ matrix.label }}-${{ matrix.clock }}
+          path: triage/
+          retention-days: 14
