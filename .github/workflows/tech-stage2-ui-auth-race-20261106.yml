@@ -20,7 +20,7 @@ jobs:
         working-directory: web/frontend
         run: |
           npm ci
-          npm test
+          npm test -- src/authRace.test.ts src/api.test.ts src/apiAuthIsolation.test.ts src/ManualAssetsPanel.qa016.test.tsx
           npm run build
           npm audit --omit=dev --audit-level=high
       - uses: actions/setup-python@v5
@@ -36,3 +36,17 @@ jobs:
             tests/test_tech_replay_qa30_stop.py \
             tests/test_p0_explicit_paper_control.py \
             tests/test_p0_turnover.py
+
+  existing-frontend-app-acceptance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Run ALL existing frontend assertions and report any legacy failure
+        working-directory: web/frontend
+        run: |
+          npm ci
+          npm test
