@@ -61,13 +61,13 @@ for (const route of ['/accounts','/dashboard']) {
   observations.push({ test: route, status: 'PASS', title });
 }
 await page.goto(root+'/assets',{waitUntil:'domcontentloaded'});
-await page.getByRole('button',{name:'로그아웃'}).click();
+const [logoutResponse] = await Promise.all([\n  page.waitForResponse(response => response.url().includes('/api/v1/logout') && response.request().method() === 'POST', { timeout: 15000 }),\n  page.getByRole('button',{name:'로그아웃'}).click()\n]);\nobservations.push({ test: 'logout-http', status: logoutResponse.ok() ? 'PASS' : 'FAIL', http: logoutResponse.status() });
 await page.getByRole('heading',{name:'Wealthy에 로그인'}).waitFor();
 const unauth = await page.evaluate(async()=>{
   const r = await fetch('/api/v1/portfolio');
   return r.status;
 });
-assert(unauth === 401, 'Logged-out financial portfolio API was not 401');
+observations.push({test:'logout-portfolio-status',status:unauth===401?'PASS':'FAIL',http:unauth});\nassert(unauth === 401, 'Logged-out financial portfolio API was ' + unauth + ', not 401');
 observations.push({test:'logout-401-protected-view',status:'PASS',http:unauth});
 await login(page,'design_b','design test account bravo 2026');
 const switched = await page.evaluate(async()=>{
