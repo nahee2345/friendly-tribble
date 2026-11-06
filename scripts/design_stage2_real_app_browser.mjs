@@ -90,6 +90,7 @@ assert(csrfRejection.status === 403, 'Missing CSRF allowed mutation: HTTP '+csrf
 observations.push({test:'authenticated-mutation-missing-csrf-403',status:'PASS',http:403});
 
 await page.goto(root + '/stage1', { waitUntil:'domcontentloaded' });
+await page.getByRole('button',{name:'자산·설정·보고서'}).click();
 try {
   await page.getByRole('heading',{name:'가상 투자 워크스페이스'}).waitFor({timeout:8000});
 } catch (error) {
