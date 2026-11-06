@@ -1,0 +1,85 @@
+name: Stage2 safety hardening and Stage3 asset scope acceptance
+on:
+  push:
+    branches: [tech/stage2-hardening-stage3-prep-20261106]
+  pull_request:
+    branches: [tech/stage2-nav-turnover-integration-20261104]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  p0-integration-and-qa30-replay:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[web]' pytest
+      - name: P0 proof / exact cap / OS SIGKILL / QA30 replay / signed HTTP and scope
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+        run: |
+          python -m pytest -q \
+            tests/test_stage2_verified_opening_nav_and_atomic_paper.py \
+            tests/test_tech_replay_qa30_stop.py \
+            tests/test_qa_p0_api_ledger.py \
+            tests/test_p0_explicit_paper_control.py \
+            tests/test_p0_session_reservations.py \
+            tests/test_p0_turnover.py \
+            tests/test_stage1_us_market_calendar.py \
+            tests/test_web_api.py
+  browser-auth-and-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm --prefix web/frontend ci
+      - run: npm --prefix web/frontend test -- src/apiAuthIsolation.test.ts src/paperControlDisplay.test.ts
+      - run: npm --prefix web/frontend run build
+  historical-current-regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - clock: '2026-10-19T10:00:00Z'
+            label: historical-pre-funding
+          - clock: '2026-11-06T10:00:00Z'
+            label: post-funding
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[web]' pytest freezegun
+      - name: Write external test-only clock plugin (no runtime safety overrides)
+        run: |
+          cat >/tmp/wealthy_qa_fixed_clock.py <<'PY'
+          import os
+          from freezegun import freeze_time
+          _clock = None
+          def pytest_configure(config):
+              global _clock
+              _clock = freeze_time(os.environ["QA_FIXED_CLOCK"], auto_tick_seconds=0.001)
+              _clock.start()
+          def pytest_unconfigure(config):
+              global _clock
+              if _clock is not None:
+                  _clock.stop()
+                  _clock = None
+          PY
+      - name: Historical Stage4/5/6/7 acceptance - FAIL remains FAIL
+        env:
+          PYTHONPATH: /tmp
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+          QA_FIXED_CLOCK: ${{ matrix.clock }}
+        run: |
+          python -m pytest -p wealthy_qa_fixed_clock -q \
+            tests/test_stage4_portfolio.py tests/test_stage5_accounting.py \
+            tests/test_stage6_risk.py tests/test_stage7_release.py
