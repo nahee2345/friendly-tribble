@@ -53,7 +53,11 @@ def test_corrupt_owner_ledger_precedes_session_gate_without_any_fill(tmp_path,mo
     assert not result["executed"]
     with p._db() as db:
         assert db.execute("SELECT COUNT(*) FROM virtual_orders").fetchone()[0]==0
-        assert db.execute("SELECT COUNT(*) FROM stage1_turnover_claims").fetchone()[0]==0
+        assert not db.execute(
+            "SELECT 1 FROM sqlite_master WHERE name='stage1_turnover_claims'"
+        ).fetchone() or db.execute(
+            "SELECT COUNT(*) FROM stage1_turnover_claims"
+        ).fetchone()[0]==0
         row=db.execute("""SELECT status FROM stage4_execution_claims
                            WHERE request_id=?""",
                        ("integrity-interrupted-001",)).fetchone()
@@ -69,4 +73,8 @@ def test_healthy_owner_still_denied_without_market_nav(tmp_path,monkeypatch):
     assert result["executed"]==[]
     with p._db() as db:
         assert db.execute("SELECT COUNT(*) FROM virtual_orders").fetchone()[0]==0
-        assert db.execute("SELECT COUNT(*) FROM stage1_turnover_claims").fetchone()[0]==0
+        assert not db.execute(
+            "SELECT 1 FROM sqlite_master WHERE name='stage1_turnover_claims'"
+        ).fetchone() or db.execute(
+            "SELECT COUNT(*) FROM stage1_turnover_claims"
+        ).fetchone()[0]==0
