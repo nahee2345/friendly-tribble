@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import {request as authenticatedRequest} from './api';
 import './stage1.css';
 import {Stage1Dashboard} from './Stage1Dashboard';
 import {paperControlDisplay,paperMayExecute} from './paperControlDisplay';
@@ -29,9 +30,10 @@ type Article={title_original:string;title_ko:string|null;url:string;published:st
 type Quote={status:string;tradeable:boolean;symbol?:string;price?:string;currency?:string;as_of?:string;delay_notice?:string};
 const money=(v:string|number)=>Number(v).toLocaleString('ko-KR',{maximumFractionDigits:2});
 const newKey=()=>`stage1_${crypto.randomUUID()}`;
-function csrf(){const item=document.cookie.split(';').map(x=>x.trim()).find(x=>x.startsWith('wealthy_csrf='));return item?decodeURIComponent(item.slice('wealthy_csrf='.length)):'';}
-async function get<T>(path:string):Promise<T>{const r=await fetch(path,{credentials:'same-origin',cache:'no-store'});if(!r.ok)throw Error(`조회 실패 (${r.status})`);return r.json();}
-async function post<T>(path:string,value:unknown):Promise<T>{const r=await fetch(path,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf()},body:JSON.stringify(value)});if(!r.ok)throw Error(`요청이 거부되었습니다 (${r.status}). 입력·잔액·시세를 확인해 주세요.`);return r.json();}
+// Shared session-generation barrier: stale 200/401/403 cannot repopulate
+// PAPER cards after sign-out or a new authenticated session.
+async function get<T>(path:string):Promise<T>{return authenticatedRequest<T>(path);}
+async function post<T>(path:string,value:unknown):Promise<T>{return authenticatedRequest<T>(path,{method:'POST',body:JSON.stringify(value)});}
 const approvalStatusKo=(status:string,executed:boolean)=>executed?'PAPER 가상체결 기록 확인':({
   PENDING:'승인 대기', APPROVED:'승인됨 · 가상체결 전',
   REJECTED:'승인 거절', EXPIRED:'승인 만료'

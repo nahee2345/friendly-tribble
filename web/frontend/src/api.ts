@@ -56,7 +56,7 @@ function csrfToken(): string | undefined {
   try { return decodeURIComponent(item.slice("wealthy_csrf=".length)); } catch { return undefined; }
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const issuedGeneration = authGeneration;
   const headers = new Headers(init.headers);
   if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
@@ -73,7 +73,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     credentials: "same-origin",
     cache: "no-store"
   });
-  if (!response.ok && (response.status === 401 || response.status === 403)) {
+  if (authGeneration === issuedGeneration && !response.ok && (response.status === 401 || response.status === 403)) {
     invalidateAuthSession();
   }
   if (authGeneration !== issuedGeneration) {

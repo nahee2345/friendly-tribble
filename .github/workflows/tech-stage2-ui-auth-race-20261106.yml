@@ -1,0 +1,68 @@
+name: Tech Stage2 UI auth race fail-closed regression
+on:
+  push:
+    branches: [tech/stage2-ui-auth-race-20261106]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  frontend-auth-and-p0:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+      - name: Same-origin protected UI unit regression
+        working-directory: web/frontend
+        run: |
+          npm ci
+          npm test -- src/authRace.test.ts src/api.test.ts src/apiAuthIsolation.test.ts src/ManualAssetsPanel.qa016.test.tsx
+          npm run build
+          npm audit --omit=dev --audit-level=high
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Core P0 server stop/readiness invariant
+        run: |
+          python -m pip install -e '.[web]' pytest
+          python -m pytest -q \
+            tests/test_stage2_integrity_diagnostic_priority.py \
+            tests/test_stage2_verified_opening_nav_and_atomic_paper.py \
+            tests/test_stage2_http_current_readiness.py \
+            tests/test_tech_replay_qa30_stop.py \
+            tests/test_p0_explicit_paper_control.py \
+            tests/test_p0_turnover.py
+
+  existing-frontend-app-acceptance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Run ALL existing frontend assertions and report any legacy failure
+        working-directory: web/frontend
+        run: |
+          npm ci
+          npm test
+
+  original-pr34-full-frontend-baseline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 9e0bd8322152b00fdabe6212df39c7c65997a10c
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Run unchanged full frontend assertions on parent commit
+        working-directory: web/frontend
+        run: |
+          npm ci
+          npm test
