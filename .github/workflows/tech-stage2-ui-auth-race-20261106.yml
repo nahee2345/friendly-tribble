@@ -50,3 +50,19 @@ jobs:
         run: |
           npm ci
           npm test
+
+  original-pr34-full-frontend-baseline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 9e0bd8322152b00fdabe6212df39c7c65997a10c
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Run unchanged full frontend assertions on parent commit
+        working-directory: web/frontend
+        run: |
+          npm ci
+          npm test
