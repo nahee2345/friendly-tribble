@@ -125,7 +125,7 @@ export function AssetsPage() {
           : ""}
       </section>
       <section className="metric-grid portfolio-metrics" aria-label="포트폴리오 요약">
-        <article className="metric"><span>투자자산 합계</span><strong>{formatKrw(state.data.investable_total_krw)}</strong><small>결측값과 보호저축을 임의로 합산하지 않습니다.</small></article>
+        <article className="metric"><span>투자자산 합계</span><strong>{formatKrw(state.data.total_scope?.status === "LEDGER_COMPLETE" && state.data.total_scope.realm === state.data.data_scope ? state.data.investable_total_krw : null)}</strong><small>범위·원장 미검증 시 합계를 숨기며 보호저축은 제외합니다.</small></article>
         <article className="metric"><span>계좌 원장</span><strong>{state.data.accounts.length ? `${state.data.accounts.length}개` : "미입력"}</strong><small>서로 다른 자료 영역은 합산하지 않습니다.</small></article>
         <article className="metric"><span>보유 항목</span><strong>{state.data.positions.length ? `${state.data.positions.length}개` : "미입력"}</strong><small>검증된 원장 행만 집계합니다.</small></article>
         <article className="metric"><span>월별 기록</span><strong>{state.data.monthly_history.length ? `${state.data.monthly_history.length}개월` : "미입력"}</strong><small>입금과 투자손익을 구분합니다.</small></article>
