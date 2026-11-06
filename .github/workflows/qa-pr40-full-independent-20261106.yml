@@ -1,0 +1,103 @@
+name: QA PR40 independent full frontend 83-node and safety
+on:
+  push:
+    branches: [qa/pr40-full-regression-independent-20261106]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  frontend-all-and-auth:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm --prefix web/frontend ci
+      - name: All existing frontend tests, no exclusions or weakened assertions
+        run: npm --prefix web/frontend test
+      - name: QA-owned auth-generation independent regression
+        run: npm --prefix web/frontend test -- src/qaPr40AuthRace.test.ts
+      - name: Vite production build
+        run: npm --prefix web/frontend run build
+  p0-and-qa-recovery:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[web]' pytest
+      - name: PR40 unchanged P0 and source-boundary suite
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+        run: |
+          python -m pytest -q tests/test_stage2_integrity_diagnostic_priority.py tests/test_stage2_verified_opening_nav_and_atomic_paper.py tests/test_stage2_nav_source_boundary.py tests/test_stage2_http_current_readiness.py tests/test_tech_replay_qa30_stop.py tests/test_p0_explicit_paper_control.py tests/test_p0_turnover.py
+      - name: Re-execute QA-owned atomic and SIGKILL process contracts
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+        run: |
+          python -m pytest -q tests/test_qa_pr40_atomic_recovery.py
+  historical-83-immutable-nodes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        utc: ["2026-10-19T10:00:00Z", "2026-11-06T10:00:00Z"]
+    name: PR40 83 nodes at ${{ matrix.utc }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[web]' pytest freezegun
+      - name: Freeze same absolute UTC without changing product clock
+        run: |
+          cat >/tmp/qa_pr40_fixed_clock.py <<'PY'
+          import os
+          from freezegun import freeze_time
+          _frozen=None
+          def pytest_configure(config):
+              global _frozen
+              _frozen=freeze_time(os.environ["QA_FIXED_CLOCK"],auto_tick_seconds=0.001)
+              _frozen.start()
+          def pytest_unconfigure(config):
+              if _frozen is not None: _frozen.stop()
+          PY
+      - name: Run unchanged Stage4-7, preserve all 11 FAIL and node-level evidence
+        env:
+          PYTHONPATH: /tmp
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+          QA_FIXED_CLOCK: ${{ matrix.utc }}
+        run: |
+          mkdir -p qa-evidence
+          git rev-parse HEAD >qa-evidence/sha.txt
+          python -m pip freeze >qa-evidence/pip-freeze.txt
+          set +e
+          python -m pytest -p qa_pr40_fixed_clock --junitxml=qa-evidence/results.xml -q --tb=line tests/test_stage4_portfolio.py tests/test_stage5_accounting.py tests/test_stage6_risk.py tests/test_stage7_release.py
+          code=$?
+          set -e
+          python - <<'PY'
+          import json,xml.etree.ElementTree as ET
+          root=ET.parse("qa-evidence/results.xml").getroot()
+          rows=[]
+          for test in root.iter("testcase"):
+              f=test.find("failure")
+              if f is None: f=test.find("error")
+              s=test.find("skipped")
+              rows.append({"id":test.attrib.get("classname","")+"::"+test.attrib.get("name",""),"status":"FAIL" if f is not None else ("SKIP" if s is not None else "PASS"),"error":f.attrib.get("message","")[:300] if f is not None else ""})
+          open("qa-evidence/nodes.json","w").write(json.dumps(rows,indent=2,ensure_ascii=False))
+          print("QA_NODE_SUMMARY",json.dumps({"total":len(rows),"failed":sum(x["status"]=="FAIL" for x in rows),"skipped":sum(x["status"]=="SKIP" for x in rows)}))
+          assert len(rows)==83
+          assert not any(x["status"]=="SKIP" for x in rows)
+          PY
+          exit "$code"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: qa-pr40-83-${{ strategy.job-index }}
+          path: qa-evidence/
+          retention-days: 14
