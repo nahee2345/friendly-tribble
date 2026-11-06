@@ -138,6 +138,42 @@ for (const width of dimensions) {
   }
 }
 await page.evaluate(() => { document.body.style.zoom = '1'; });
+// PR40 /dashboard is the single Stage1 integrated dashboard, including a
+// separate no-broker-order boundary and evidence of missing input.
+await page.goto(root+'/dashboard',{waitUntil:'domcontentloaded'});
+await page.getByRole('heading',{name:'통합 대시보드'}).waitFor();
+assert(await page.getByRole('link',{name:'통합 대시보드'}).count()===1,
+  'Duplicate integrated dashboard sidebar navigation');
+await page.getByLabel('실제 주문 및 입력자료 상태').getByText('주문 기능 없음').waitFor();
+observations.push({test:'pr40-dashboard-accessible-heading-and-no-orders',status:'PASS'});
+await page.screenshot({path:resolve(out,'pr40-dashboard-boundary.png'),fullPage:true});
+await page.goto(root+'/stage1',{waitUntil:'domcontentloaded'});
+await page.getByRole('heading',{name:'통합 대시보드'}).waitFor();
+observations.push({test:'pr40-stage1-deep-link',status:'PASS'});
+
+// Capture the true browser computed foreground/background contrast rather
+// than claiming human visual review. Samples with transparent backgrounds
+// are reported as unverified, never treated as high contrast.
+const contrast = await page.evaluate(()=>{
+  const rgb = value => {
+    const m = value.match(/rgba?\\(([^)]+)\\)/);
+    if(!m)return null;
+    const p = m[1].split(',').map(Number);
+    return {v:p.slice(0,3),a:p.length===4?p[3]:1};
+  };
+  const linear = x => {x/=255;return x<=0.04045?x/12.92:Math.pow((x+0.055)/1.055,2.4)};
+  const lum = v => 0.2126*linear(v[0])+0.7152*linear(v[1])+0.0722*linear(v[2]);
+  return ['.wh-caveat','.wh-header','.wh-stage8-strip'].map(sel=>{
+    const node=document.querySelector(sel);
+    if(!node)return {selector:sel,status:'MISSING'};
+    const style=getComputedStyle(node);
+    const fg=rgb(style.color),bg=rgb(style.backgroundColor);
+    return {selector:sel,foreground:style.color,background:style.backgroundColor,
+      ratio:fg&&bg&&fg.a===1&&bg.a===1?
+        (Math.max(lum(fg.v),lum(bg.v))+0.05)/(Math.min(lum(fg.v),lum(bg.v))+0.05):null};
+  });
+});
+observations.push({test:'pr40-computed-contrast-samples',status:'MEASURED_NOT_VISUALLY_APPROVED',contrast});
 for (const route of ['/accounts','/dashboard']) {
   await page.goto(root + route, { waitUntil: 'domcontentloaded' });
   await page.screenshot({ path: resolve(out,route.slice(1)+'-logged-in.png'),fullPage:true });
