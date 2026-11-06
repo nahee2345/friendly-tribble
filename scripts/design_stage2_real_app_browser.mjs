@@ -133,7 +133,7 @@ for (const width of dimensions) {
       });
       const label = 'assets-' + width + '-' + theme + '-' + zoom;
       await page.screenshot({ path: resolve(out,label+'.png'), fullPage: true, animations: 'disabled' });
-      observations.push({ test: label, status: metrics.hasFocus ? 'PASS' : 'FAIL', ...metrics });
+      observations.push({ test: label, status: metrics.hasFocus && !metrics.horizontalOverflow ? 'PASS' : 'FAIL', ...metrics });
     }
   }
 }
