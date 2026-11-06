@@ -1,0 +1,80 @@
+name: Design PR40 authenticated real-app Chrome E2E (isolated)
+on:
+  push:
+    branches:
+      - design/pr40-dynamic-app-review-20261106
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  authenticated-browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+      - name: Create isolated state and install app
+        run: |
+          echo "DESIGN_E2E_DATA_DIR=$(mktemp -d /tmp/wealthy-design-e2e-XXXXXXXX)" >> "$GITHUB_ENV"
+          python -m pip install -e '.[web]' pytest
+          npm ci --prefix web/frontend
+          npm --prefix web/frontend run build
+      - name: Install browser tooling
+        run: |
+          npx --yes playwright@1.58.2 install --with-deps chromium
+          npm install --no-save --prefix /tmp/wealthy-design-playwright playwright@1.58.2
+      - name: Start real FastAPI app using temporary 2-user SQLite (127.0.0.1 only)
+        run: |
+          python -m uvicorn scripts.design_stage2_ephemeral_app:app --host 127.0.0.1 --port 8000 --log-level warning > /tmp/design-server.log 2>&1 &
+          echo "$!" > /tmp/design-server.pid
+          for i in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:8000/assets > /dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/design-server.log
+          exit 1
+      - name: Actual authenticated browser tests (not static fixture)
+        run: node scripts/design_stage2_real_app_browser.mjs
+      - name: Stop single-user fixture server
+        run: |
+          kill "$(cat /tmp/design-server.pid)"
+          sleep 1
+      - name: Create independent two-user fail-closed fixture (never reuse first DB)
+        run: |
+          echo "DESIGN_E2E_DATA_DIR=$(mktemp -d /tmp/wealthy-design-e2e-XXXXXXXX)" >> "$GITHUB_ENV"
+      - name: Start two-user prohibited-state app
+        env:
+          DESIGN_E2E_TWO_USERS: '1'
+        run: |
+          python -m uvicorn scripts.design_stage2_ephemeral_app:app --host 127.0.0.1 --port 8000 --log-level warning > /tmp/design-server-two.log 2>&1 &
+          echo "$!" > /tmp/design-server.pid
+          for i in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:8000/assets > /dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/design-server-two.log
+          exit 1
+      - name: Two users exist - both login attempts fail closed (HTTP 400)
+        env:
+          DESIGN_E2E_TWO_USERS: '1'
+        run: node scripts/design_stage2_real_app_browser.mjs
+      - name: Stop only the test server
+        if: always()
+        run: |
+          if test -f /tmp/design-server.pid; then kill "$(cat /tmp/design-server.pid)" || true; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: design-stage2-authenticated-real-app-e2e
+          path: design-artifacts/real-app/
+          retention-days: 14
+          if-no-files-found: warn
