@@ -1,0 +1,38 @@
+name: Tech Stage2 UI auth race fail-closed regression
+on:
+  push:
+    branches: [tech/stage2-ui-auth-race-20261106]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  frontend-auth-and-p0:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+      - name: Same-origin protected UI unit regression
+        working-directory: web/frontend
+        run: |
+          npm ci
+          npm test
+          npm run build
+          npm audit --omit=dev --audit-level=high
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Core P0 server stop/readiness invariant
+        run: |
+          python -m pip install -e '.[web]' pytest
+          python -m pytest -q \
+            tests/test_stage2_integrity_diagnostic_priority.py \
+            tests/test_stage2_verified_opening_nav_and_atomic_paper.py \
+            tests/test_stage2_http_current_readiness.py \
+            tests/test_tech_replay_qa30_stop.py \
+            tests/test_p0_explicit_paper_control.py \
+            tests/test_p0_turnover.py
