@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
-import { api, ApiError } from "./api";
+import { api, ApiError, subscribeAuthInvalidation } from "./api";
 import type { UserSummary } from "./types";
 
 interface AuthContextValue {
@@ -14,6 +14,12 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserSummary | null>(null);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    // A 401/403 or local sign-out clears the account before any delayed
+    // dashboard/asset request can become visible again.
+    return subscribeAuthInvalidation(() => setUser(null));
+  }, []);
 
   useEffect(() => {
     let active = true;
