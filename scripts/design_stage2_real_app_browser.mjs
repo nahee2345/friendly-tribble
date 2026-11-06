@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const root = process.env.DESIGN_E2E_URL || 'http://127.0.0.1:8000';
-const out = resolve('design-artifacts/real-app');
+const out = resolve('design-artifacts/real-app', process.env.DESIGN_E2E_TWO_USERS === '1' ? 'two-users-blocked' : 'single-user');
 mkdirSync(out, { recursive: true });
 const browser = await chromium.launch({ headless: true });
 const observations = [];
@@ -21,6 +21,35 @@ async function login(page, username, password) {
 const ctx = await browser.newContext({ viewport: { width: 1366, height: 900 }, colorScheme: 'light' });
 const page = await ctx.newPage();
 page.on('pageerror', e => errors.push(String(e)));
+if (process.env.DESIGN_E2E_TWO_USERS === '1') {
+  for (const [username,password] of [
+    ['design_a','design test account alpha 2026'],
+    ['design_b','design test account bravo 2026']
+  ]) {
+    await page.goto(root + '/assets', { waitUntil: 'domcontentloaded' });
+    await page.getByRole('textbox', { name: '사용자 이름' }).fill(username);
+    await page.getByLabel('비밀번호').fill(password);
+    const [response] = await Promise.all([
+      page.waitForResponse(r => r.url().includes('/api/v1/login') && r.request().method() === 'POST'),
+      page.getByRole('button',{name:'로그인'}).click()
+    ]);
+    assert(response.status() === 400, 'Two-user local runtime must block ' + username + ', got ' + response.status());
+    await page.getByRole('heading',{name:'Wealthy에 로그인'}).waitFor();
+    assert(await page.getByRole('heading',{name:'내 자산 · 월별 정리'}).count() === 0, 'Finance page exposed for ' + username);
+    const finance = await page.evaluate(async () => {
+      const r = await fetch('/api/v1/portfolio');
+      return { status: r.status, text: await r.text() };
+    });
+    assert(finance.status !== 200, 'Protected financial API allowed second-user database');
+    assert(!finance.text.includes('design_a') && !finance.text.includes('design_b'), 'Protected account identity leaked');
+    observations.push({test:'single-owner-fail-closed-'+username,status:'PASS',loginHttp:400,portfolioHttp:finance.status});
+  }
+  await page.screenshot({path:resolve(out,'two-users-blocked.png'),fullPage:true});
+  await browser.close();
+  writeFileSync(resolve(out,'results.json'),JSON.stringify({kind:'actual local-runtime two-user fail-closed',observations,errors},null,2));
+  console.log('Two-user fail-closed Chrome checks:',observations.length);
+  process.exit(0);
+}
 await login(page, 'design_a', 'design test account alpha 2026');
 const token = await page.evaluate(async () => {
   const r = await fetch('/api/v1/session', { credentials: 'same-origin' });
@@ -74,15 +103,8 @@ const unauth = await page.evaluate(async()=>{
 observations.push({test:'logout-portfolio-status',status:unauth===401?'PASS':'FAIL',http:unauth});
 assert(unauth === 401, 'Logged-out financial portfolio API was ' + unauth + ', not 401');
 observations.push({test:'logout-401-protected-view',status:'PASS',http:unauth});
-await login(page,'design_b','design test account bravo 2026');
-const switched = await page.evaluate(async()=>{
-  const session = await (await fetch('/api/v1/session')).json();
-  const portfolio = await (await fetch('/api/v1/portfolio')).json();
-  return {user:session.user?.username, data_scope:portfolio.data_scope,accounts:portfolio.accounts?.length??0};
-});
-assert(switched.user === 'design_b', 'User switch failed');
-observations.push({test:'second-user-session',status:'PASS',...switched});
-await page.screenshot({path:resolve(out,'second-user-assets.png'),fullPage:true});
 await browser.close();
-writeFileSync(resolve(out,'results.json'),JSON.stringify({kind:'authenticated actual FastAPI+React temporary database, not production',app_source:'PR32 candidate plus design CSS',errors,observations},null,2));
-console.log('Actual browser E2E complete:',observations.length,'checks; JS errors:',errors.length);
+writeFileSync(resolve(out,'results.json'),JSON.stringify({kind:'authenticated single-user local Wealthy FastAPI+React temporary database',errors,observations},null,2));
+assert(errors.length === 0, 'Browser JS errors: ' + errors.length);
+assert(observations.filter(o => o.status === 'FAIL').length === 0, 'One or more browser checks failed');
+console.log('Single-user authenticated browser E2E:',observations.length,'checks; JS errors:',errors.length);
