@@ -1,0 +1,31 @@
+name: QA PR32 independent P0 regression and recovery
+on:
+  push:
+    branches: [qa/pr32-independent-regression-20261106]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  qa-independent-pr32:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[web]' pytest
+      - name: Independent QA cap, approval boundaries, idempotence, multiprocess, crash rollback
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+        run: python -m pytest -vv -rA tests/test_qa_pr32_independent_atomic.py
+      - name: Independent authenticated HTTP and CSRF checks
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+        run: |
+          python -m pytest -vv -rA tests/test_stage2_http_current_readiness.py tests/test_qa_p0_api_ledger.py -k 'authenticated_http_order_and_opening_nav_fail_closed_without_evidence or http_order_refuses_unverified_opening_nav_without_any_order or authenticated_paper_readiness_endpoint_is_unverified'
+      - name: QA re-execute original PR32 auth, asset scope, and stop contracts
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+        run: |
+          python -m pytest -q tests/test_tech_replay_qa30_stop.py tests/test_stage2_verified_opening_nav_and_atomic_paper.py tests/test_web_api.py
