@@ -54,6 +54,9 @@ def environment(tmp_path):
     ledger=Stage1Ledger(path)
     p=Portfolios(path)
     initialize_paper_accounts("alice",ledger,p,today=START.date())
+    # Historical low-level fill fixture: deliberate owner opt-in in TEMP DB.
+    # Production readiness and real API remain blocked; assertions unchanged.
+    set_paused("alice",p,False,"isolated stage5 test-only opt-in")
     cache=MarketStore.for_portfolios(p)
     engine=AccountingEngine(p,cache)
     return ledger,p,cache,engine
