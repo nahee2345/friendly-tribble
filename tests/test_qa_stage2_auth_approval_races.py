@@ -136,3 +136,23 @@ def test_concurrent_rejected_approval_and_writer_are_serialized(tmp_path):
             "SELECT COUNT(*) FROM stage1_turnover_claims "
             "WHERE owner=? AND request_id=?",(fixture.OWNER,key)).fetchone()[0]
     assert claims==_count_orders(p)
+
+
+def test_exact_24h_elapsed_marks_approval_expired_without_fill(tmp_path,monkeypatch):
+    import wealthy_server.stage1_controls as controls
+    p,_,_=fixture.ready(tmp_path)
+    key="qa-exact-24h-from-created"
+    monkeypatch.setattr(controls,"now_utc",lambda:fixture.NOW)
+    request_approval(fixture.OWNER,p,request_id=key,account="kr-base",
+        symbol="069500",side="BUY",quantity=30,amount_krw=300000,
+        rationale="QA exact elapsed 24 hours")
+    decide_approval(fixture.OWNER,p,key,True)
+    before=_count_orders(p)
+    monkeypatch.setattr(controls,"now_utc",lambda:fixture.NOW+timedelta(hours=24))
+    statuses=controls.list_approvals(fixture.OWNER,p)
+    rows=statuses["items"]
+    state=next(x["status"] for x in rows if x["request_id"]==key)
+    assert state=="EXPIRED"
+    with pytest.raises(ValueError,match="APPROVAL_SCOPE_AMOUNT_OR_EXPIRY_MISMATCH"):
+        _buy(p,key)
+    assert _count_orders(p)==before
