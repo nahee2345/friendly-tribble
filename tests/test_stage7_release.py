@@ -37,7 +37,7 @@ def stage7_historical_fixture_record_clock(monkeypatch):
     helpers is replaced. The real production clock, audit validation,
     assertions, and default PAPER trading prohibition are untouched.
     """
-    from wealthy_server import stage1_bootstrap, stage1_portfolios, stage1_controls
+    from wealthy_server import stage1_bootstrap, stage1_portfolios, stage1_controls, stage1_paper
 
     class HistoricalRecordDatetime(datetime):
         @classmethod
@@ -46,7 +46,7 @@ def stage7_historical_fixture_record_clock(monkeypatch):
                 return NOW.replace(tzinfo=None)
             return NOW.astimezone(tz)
 
-    for module in (stage1_bootstrap, stage1_portfolios, stage1_controls):
+    for module in (stage1_paper, stage1_bootstrap, stage1_portfolios, stage1_controls):
         monkeypatch.setattr(module, "datetime", HistoricalRecordDatetime)
 
 
