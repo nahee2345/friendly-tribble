@@ -80,6 +80,8 @@ export interface PortfolioAccount {
   data_scope?: string | null;
   as_of?: string | null;
   status?: string | null;
+  included_in_investable_total?: boolean | null;
+  externally_verified?: boolean | null;
 }
 
 export interface PortfolioPosition {
@@ -125,6 +127,13 @@ export interface ActualStrategyAllocation {
 }
 
 export interface PortfolioData {
+  total_scope?: {
+    status: string;
+    included_account_ids: string[];
+    excluded_account_ids: string[];
+    realm?: string | null;
+    externally_verified?: boolean;
+  } | null;
   data_scope?: string | null;
   as_of?: string | null;
   stale?: boolean;
