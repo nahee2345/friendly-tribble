@@ -230,3 +230,41 @@ os.kill(os.getpid(),signal.SIGKILL)
     assert before["stage1_turnover_claims"] == 1
     assert _order(reopened, "qa-after-commit-001")["status"] == "already_executed"
     assert _ledger(reopened) == before
+
+
+def test_qa_sigkill_after_mark_filled_rolls_back_complete_transaction(tmp_path):
+    p, _, _ = fixture.ready(tmp_path)
+    before = _ledger(p)
+    child_script = r"""
+import importlib.util, os, signal, sys
+from pathlib import Path
+from wealthy_server.stage1_portfolios import Portfolios
+from wealthy_server import stage1_verified_execution as writer
+source=Path(sys.argv[2])
+spec=importlib.util.spec_from_file_location('qa_markfilled_fixture',source)
+mod=importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+original=writer.mark_filled
+def kill_after_mark(*args,**kwargs):
+    result=original(*args,**kwargs)
+    os.kill(os.getpid(),signal.SIGKILL)
+    return result
+writer.mark_filled=kill_after_mark
+writer.execute_verified_paper(Portfolios(sys.argv[1],require_verified_p0=True),
+    owner=mod.OWNER,account='default',symbol='SPYM',side='BUY',
+    quantity=1,request_id='qa-crash-post-filled',
+    quote=mod.US,fx=mod.FX,auto_fx=True,session_date=mod.DAY,now=mod.NOW)
+"""
+    child = subprocess.run(
+        [sys.executable,"-c",child_script,str(p.path),str(FIXTURE_PATH)],
+        capture_output=True,text=True,timeout=30)
+    assert child.returncode == -signal.SIGKILL, child.stderr
+    reopened=Portfolios(p.path,require_verified_p0=True)
+    assert _ledger(reopened)==before
+    with reopened._db() as db:
+        assert db.execute("PRAGMA integrity_check").fetchone()[0]=="ok"
+    assert execute_verified_paper(
+        reopened,owner=fixture.OWNER,account="default",symbol="SPYM",
+        side="BUY",quantity=1,request_id="qa-post-mark-recovered",
+        quote=fixture.US,fx=fixture.FX,auto_fx=True,
+        session_date=fixture.DAY,now=fixture.NOW)["status"]=="executed"
