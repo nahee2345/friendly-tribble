@@ -74,6 +74,7 @@ def test_default_funded_accounts_are_healthy_and_unpaused_is_not_assumed(tmp_pat
 
 def test_cross_account_funding_fx_buy_sale_and_sqlite_checks(tmp_path):
     ledger,p=setup(tmp_path)
+    set_paused("alice",p,False,"isolated stage7 test-only fill fixture")
     p.trade("alice","kr-base","005930","BUY",2,"first-purchase-kr",q("005930","10000"))
     p.trade("alice","kr-base","005930","SELL",1,"partial-exit-kr",q("005930","12000"))
     p.auto_buy_usd_with_fx("alice","VOO",q("VOO","85"),"1400","first-us-etf-001")
@@ -100,6 +101,7 @@ def test_sqlite_readonly_audit_does_not_change_paper_table_counts(tmp_path):
 
 def test_negative_position_from_tampered_order_is_blocked(tmp_path):
     _,p=setup(tmp_path)
+    set_paused("alice",p,False,"isolated stage7 test-only fill fixture")
     p.trade("alice","kr-base","005930","BUY",1,"buy-inventory-001",q("005930","10000"))
     with p._db() as db:
         db.execute("BEGIN IMMEDIATE")
@@ -167,6 +169,7 @@ def test_executed_claim_without_real_order_is_not_trusted(tmp_path):
 
 def test_claim_with_real_simulated_order_is_consistent(tmp_path):
     _,p=setup(tmp_path)
+    set_paused("alice",p,False,"isolated stage7 test-only fill fixture")
     p.trade("alice","kr-base","069500","BUY",1,"s4:20261019:KR:ETF",
             q("069500","10000"))
     write_claim(p,state="EXECUTED")
@@ -253,6 +256,7 @@ def test_backup_path_traversal_symlink_and_file_permissions_blocked(tmp_path):
 
 def test_user_isolation_no_cross_owner_orders_or_claims(tmp_path):
     ledger,p=setup(tmp_path,"alice")
+    set_paused("alice",p,False,"isolated stage7 test-only fill fixture")
     initialize_paper_accounts("bob",ledger,p,today=date(2026,10,18))
     p.trade("alice","kr-base","005930","BUY",1,"alice-order-001",
             q("005930","5000"))
@@ -280,6 +284,7 @@ def test_stopped_worker_wait_timeout_does_not_create_second_scheduler():
 
 def test_invalid_timestamp_and_nonfinite_order_value_are_detected(tmp_path):
     _,p=setup(tmp_path)
+    set_paused("alice",p,False,"isolated stage7 test-only fill fixture")
     p.trade("alice","kr-base","005930","BUY",1,"corrupt-order-001",
             q("005930","10000"))
     with p._db() as db:
