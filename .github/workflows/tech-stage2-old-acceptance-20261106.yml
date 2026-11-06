@@ -1,0 +1,93 @@
+name: Tech Stage2 legacy acceptance repaired vs identical base
+on:
+  push:
+    branches: [tech/stage2-old-acceptance-20261106]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  frontend-all:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+      - name: All unchanged 75 frontend assertions (no skip)
+        working-directory: web/frontend
+        run: |
+          npm ci
+          npm test
+          npm run build
+  stage4-to-7-fixed-utc:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        stamp: ['2026-10-19T10:00:00Z','2026-11-06T10:00:00Z']
+        ref_kind: [parent_pr37, current_fix]
+        include:
+          - ref_kind: parent_pr37
+            ref: 75a9b8e96bc7b8cae8306e8c904da441a9a7fa9d
+          - ref_kind: current_fix
+            ref: ${{ github.sha }}
+    name: ${{ matrix.ref_kind }} @ ${{ matrix.stamp }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[web]' pytest freezegun
+      - name: Isolated test clock without changing production timestamps
+        run: |
+          cat >/tmp/wealthy_qa_fixed_clock.py <<'PY'
+          import os
+          from freezegun import freeze_time
+          _clock = None
+          def pytest_configure(config):
+              global _clock
+              _clock = freeze_time(os.environ['QA_FIXED_CLOCK'], auto_tick_seconds=0.001)
+              _clock.start()
+          def pytest_unconfigure(config):
+              global _clock
+              if _clock is not None:
+                  _clock.stop()
+                  _clock = None
+          PY
+      - name: All 83 historical acceptance nodes, exact old assertions
+        env:
+          PYTHONPATH: /tmp
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+          QA_FIXED_CLOCK: ${{ matrix.stamp }}
+        run: |
+          python -m pytest -p wealthy_qa_fixed_clock -q \
+            tests/test_stage4_portfolio.py \
+            tests/test_stage5_accounting.py \
+            tests/test_stage6_risk.py \
+            tests/test_stage7_release.py
+  p0-safety-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[web]' pytest
+      - name: P0 auth, 20% NAV, OS SIGKILL and integrity contracts
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+        run: |
+          python -m pytest -q \
+            tests/test_stage2_integrity_diagnostic_priority.py \
+            tests/test_stage2_verified_opening_nav_and_atomic_paper.py \
+            tests/test_stage2_http_current_readiness.py \
+            tests/test_tech_replay_qa30_stop.py \
+            tests/test_p0_explicit_paper_control.py \
+            tests/test_p0_turnover.py
