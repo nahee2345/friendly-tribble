@@ -26,7 +26,9 @@ import { RuntimeStatusStrip } from "./runtimeStatus";
 type Theme = "light" | "dark";
 
 const navItems = [
-  { to: "/stage1", icon: "◈", label: "1단계 가상계좌" },
+  // /stage1 remains a compatible deep link to Stage1Page. The unified
+  // dashboard now displays that same component, so only one sidebar entry
+  // is shown instead of two visually distinct links to the identical view.
   { to: "/dashboard", icon: "▣", label: "통합 대시보드" },
   { to: "/assets", icon: "◫", label: "내 자산" },
   { to: "/accounts", icon: "▤", label: "계좌 · ISA" },
