@@ -30,11 +30,17 @@ db = Database.for_local_file(db_path)
 db.create_local_schema()
 auth = AuthRepository(db.session_factory)
 auth.create_user("design_a", PasswordManager().hash("design test account alpha 2026"), is_admin=True)
-if os.environ.get("DESIGN_E2E_TWO_USERS") == "1":
-    auth.create_user("design_b", PasswordManager().hash("design test account bravo 2026"), is_admin=False)
 db.dispose()
 app = build_local_application(
     data_dir=work, market_database=work / "market.sqlite3",
     frontend_dir=Path("web/frontend/dist").resolve(),
     secret_store=LocalSecretStore(FakeKeyring(), trusted_test_backend=True),
 )
+
+# Model an unexpected second local user only AFTER the actual local app is built.
+# This preserves production initialization and tests fail-closed request handling.
+if os.environ.get("DESIGN_E2E_TWO_USERS") == "1":
+    AuthRepository(app.state.database.session_factory).create_user(
+        "design_b", PasswordManager().hash("design test account bravo 2026"),
+        is_admin=False,
+    )
