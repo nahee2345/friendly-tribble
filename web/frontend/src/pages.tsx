@@ -110,6 +110,20 @@ export function AssetsPage() {
     <ManualAssetsSummary />
     {state.data && <>
       <div className={`scope-banner ${state.data.data_scope === "SAMPLE" ? "sample" : ""}`}><strong>{displayScope(state.data.data_scope)}</strong><span>기준 {formatDateTime(state.data.as_of)}</span>{state.data.stale && <span className="badge warning">미갱신</span>}</div>
+      <section className="message neutral" aria-label="투자자산 합계 범위" role="status">
+        <strong>투자자산 합산 범위:</strong>{" "}
+        {state.data.total_scope?.status === "LEDGER_COMPLETE"
+          ? (state.data.total_scope.included_account_ids.length
+            ? state.data.total_scope.included_account_ids.join(", ")
+            : "포함된 투자 계좌 없음")
+          : "미검증 · 합계 사용 보류"}
+        {" · "}
+        {state.data.total_scope?.realm ? displayScope(state.data.total_scope.realm) : "자료 영역 확인 필요"}
+        {" · "}외부 계좌 연동·잔고 검증 전
+        {state.data.total_scope?.excluded_account_ids.length
+          ? ` · 제외 계좌: ${state.data.total_scope.excluded_account_ids.join(", ")}`
+          : ""}
+      </section>
       <section className="metric-grid portfolio-metrics" aria-label="포트폴리오 요약">
         <article className="metric"><span>투자자산 합계</span><strong>{formatKrw(state.data.investable_total_krw)}</strong><small>결측값과 보호저축을 임의로 합산하지 않습니다.</small></article>
         <article className="metric"><span>계좌 원장</span><strong>{state.data.accounts.length ? `${state.data.accounts.length}개` : "미입력"}</strong><small>서로 다른 자료 영역은 합산하지 않습니다.</small></article>
@@ -803,7 +817,7 @@ export function AnalysisPage() {
 }
 export function AccountsPage() {
   const state = useLoad(api.portfolio, []);
-  return <><PageHeader eyebrow="ACCOUNTS" title="계좌 · ISA 관리" description="검증된 수동 원장 계좌만 표시하며 계좌 조회와 주문은 지원하지 않습니다." /><LoadMessage loading={state.loading} error={state.error} />{state.data && <section className="card"><div className="card-title"><h2>계좌 원장</h2><span>{state.data.accounts.length ? `${state.data.accounts.length}건` : "미입력"}</span></div>{state.data.accounts.length ? <div className="table-wrap"><table><thead><tr><th>별칭</th><th>유형</th><th>세제 상태</th><th>자료 영역</th><th>평가액</th><th>기준시각</th><th>상태</th></tr></thead><tbody>{state.data.accounts.map((account) => <tr key={String(account.id)}><td>{account.alias || "별칭 미입력"}</td><td>{account.account_type || "확인 필요"}</td><td>{account.tax_treatment || "확인 필요"}</td><td>{displayScope(account.data_scope)}</td><td>{formatKrw(account.market_value_krw)}</td><td>{formatDateTime(account.as_of)}</td><td><StatusBadge value={account.status} /></td></tr>)}</tbody></table></div> : <p className="empty">계좌 원장이 없습니다. 초기자산 선언값을 계좌 잔고로 만들지 않습니다.</p>}<ul className="boundary-list account-boundaries"><li>시세 수집용 KIS 인증정보를 계좌 조회나 주문에 재사용하지 않음</li><li>ISA 세제 수치는 공식 적용일 확인 전 계산하지 않음</li><li>보호저축·비상금은 투자자산에서 분리</li></ul></section>}</>;
+  return <><PageHeader eyebrow="ACCOUNTS" title="계좌 · ISA 관리" description="검증된 수동 원장 계좌만 표시하며 계좌 조회와 주문은 지원하지 않습니다." /><LoadMessage loading={state.loading} error={state.error} />{state.data && <section className="card"><div className="card-title"><h2>계좌 원장</h2><span>{state.data.accounts.length ? `${state.data.accounts.length}건` : "미입력"}</span></div>{state.data.accounts.length ? <div className="table-wrap"><table><thead><tr><th>별칭</th><th>유형</th><th>세제 상태</th><th>자료 영역</th><th>평가액</th><th>기준시각</th><th>상태</th></tr></thead><tbody>{state.data.accounts.map((account) => <tr key={String(account.id)}><td>{account.alias || "별칭 미입력"}</td><td>{account.account_type || "확인 필요"}</td><td>{account.tax_treatment || "확인 필요"}</td><td>{displayScope(account.data_scope)} · {account.included_in_investable_total === true ? "투자 합계 포함" : account.included_in_investable_total === false ? "투자 합계 제외" : "합산 여부 확인 필요"}</td><td>{formatKrw(account.market_value_krw)}</td><td>{formatDateTime(account.as_of)}</td><td><StatusBadge value={account.status} />{account.externally_verified !== true && <small> · 외부 계좌 미검증</small>}</td></tr>)}</tbody></table></div> : <p className="empty">계좌 원장이 없습니다. 초기자산 선언값을 계좌 잔고로 만들지 않습니다.</p>}<ul className="boundary-list account-boundaries"><li>시세 수집용 KIS 인증정보를 계좌 조회나 주문에 재사용하지 않음</li><li>ISA 세제 수치는 공식 적용일 확인 전 계산하지 않음</li><li>보호저축·비상금은 투자자산에서 분리</li></ul></section>}</>;
 }
 export function TaxPage() { return <CapabilityPage title="세금 비교 · 매도 시뮬레이션" description="상품·계좌·적용일별 공식 세금 규칙이 검증되기 전에는 세후 금액을 확정하지 않습니다." status="미구현" prerequisites={["공식 세법 근거와 기준일", "계좌·상품 과세 유형 입력", "비용·결제 시점 모델"]} />; }
 export function DividendPage() { return <CapabilityPage title="배당 현금흐름" description="실제 수령, 예상 배당, 배당 전환 능력을 구분해 표시할 예정입니다." status="자료 미연결" prerequisites={["배당 지급 이력", "세전·세후 구분", "통화·환율 기준시각"]} />; }
