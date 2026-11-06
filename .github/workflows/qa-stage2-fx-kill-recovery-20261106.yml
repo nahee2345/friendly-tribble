@@ -19,7 +19,7 @@ jobs:
       - name: QA-owned SIGKILL/backup/retry/owner tests
         env:
           PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
-        run: python -m pytest -vv -rA tests/test_qa_stage2_fx_kill_backup_owner.py tests/test_qa_stage2_two_login_owners.py tests/test_qa_stage2_auth_approval_races.py
+        run: python -m pytest -vv -rA tests/test_qa_stage2_fx_kill_backup_owner.py tests/test_qa_stage2_two_login_owners.py tests/test_qa_stage2_auth_approval_races.py tests/test_qa_stage2_http_disconnect.py
       - name: Existing HTTP authentication and no-write safety
         env:
           PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
