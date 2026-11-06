@@ -442,6 +442,12 @@ class WebApplicationService:
                 "positions": (),
                 "asset_class_totals": (),
                 "monthly_history": self._monthly_history(),
+                "total_scope": {
+                    "status": "NO_LEDGER",
+                    "included_account_ids": [],
+                    "excluded_account_ids": [],
+                    "externally_verified": False,
+                },
                 "actual_strategy": {
                     "status": "UNAVAILABLE",
                     "as_of": None,
@@ -485,6 +491,8 @@ class WebApplicationService:
                     "data_scope": scenario.realm.value,
                     "as_of": scenario.as_of.isoformat(),
                     "status": "KNOWN" if complete else "INCOMPLETE",
+                    "included_in_investable_total": account.purpose is Purpose.INVESTMENT,
+                    "externally_verified": False,
                 }
             )
 
@@ -549,6 +557,21 @@ class WebApplicationService:
             "positions": tuple(position_rows),
             "asset_class_totals": tuple(class_rows),
             "monthly_history": self._monthly_history(),
+            "total_scope": {
+                "status": "LEDGER_COMPLETE" if investment.complete else "LEDGER_INCOMPLETE",
+                "included_account_ids": [
+                    mask_account_number_like_text(account.account_id)
+                    for account in scenario.ledger.accounts
+                    if account.purpose is Purpose.INVESTMENT
+                ],
+                "excluded_account_ids": [
+                    mask_account_number_like_text(account.account_id)
+                    for account in scenario.ledger.accounts
+                    if account.purpose is not Purpose.INVESTMENT
+                ],
+                "realm": scenario.realm.value,
+                "externally_verified": False,
+            },
             "actual_strategy": {
                 "status": "UNAVAILABLE",
                 "as_of": scenario.as_of.isoformat(),
