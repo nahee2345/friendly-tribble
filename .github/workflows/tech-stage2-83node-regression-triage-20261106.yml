@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        source: [historical-baseline, stage2-pr29, stage2-pr32]
+        source: [historical-baseline, stage2-pr29, stage2-pr32, triage-current]
         time:
           - {label: oct19, utc: '2026-10-19T10:00:00Z'}
           - {label: nov06, utc: '2026-11-06T10:00:00Z'}
@@ -23,6 +23,8 @@ jobs:
             ref: 41295d54850c9fc6066c85a6578e0c9bbffe6f0f
           - source: stage2-pr32
             ref: eac7d7388e20d8cbb7c06a4e1d2174fc281e6d78
+          - source: triage-current
+            ref: ${{ github.sha }}
     name: ${{ matrix.source }} @ ${{ matrix.time.label }}
     steps:
       - uses: actions/checkout@v4
@@ -93,3 +95,24 @@ jobs:
           name: regression-${{ matrix.source }}-${{ matrix.time.label }}
           path: triage/
           retention-days: 14
+
+  integrity-priority-and-p0-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[web]' pytest
+      - name: Run new integrity status tests and unchanged P0 safety gate suite
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+        run: |
+          python -m pytest -q \
+            tests/test_stage2_integrity_diagnostic_priority.py \
+            tests/test_stage2_verified_opening_nav_and_atomic_paper.py \
+            tests/test_stage2_http_current_readiness.py \
+            tests/test_tech_replay_qa30_stop.py \
+            tests/test_p0_explicit_paper_control.py \
+            tests/test_p0_turnover.py
