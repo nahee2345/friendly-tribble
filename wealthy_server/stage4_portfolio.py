@@ -478,6 +478,18 @@ class PortfolioEngine:
         if pause_status(owner,self.portfolios)["paused"]:
             return {"status":"paused","reason":"가상매매 중지 상태",
                     "executed":[],"skipped":[],"simulated_only":True}
+        # Verify the actual owner PAPER ledger before reporting missing market
+        # evidence. An invalid ledger is a higher-priority safety finding than
+        # an unverified NAV; otherwise interrupted claims and corrupt cash are
+        # hidden behind a generic session denial. This audit is strictly
+        # read-only and cannot authorize any simulated execution.
+        from .stage7_release import audit_paper_ledger
+        audit = audit_paper_ledger(owner, self.portfolios, now=now)
+        if audit["blocking_count"]:
+            return {"status":"integrity_blocked",
+                    "reason":"가상투자 원장 무결성 감사 실패; 상세 감사에서 원인을 확인하세요.",
+                    "issues":audit["issues"],"executed":[],"skipped":[],
+                    "simulated_only":True,"trade_enabled":False}
         # P0 runtime barrier. Historic/isolated unit fixtures may still test
         # the legacy planner, but live Stage4 must not create stale claims or
         # virtual_orders before opening NAV provenance and owner-wide 20%
