@@ -28,6 +28,28 @@ NOW=datetime(2026,10,19,10,0,tzinfo=timezone.utc)
 QUOTE_DATE="2026-10-16"
 
 
+@pytest.fixture(autouse=True)
+def stage7_historical_fixture_record_clock(monkeypatch):
+    """Create synthetic 2026-10-19 ledger rows at their claimed event time.
+
+    All Stage7 inputs and the explicit audit(now=NOW) use this fixed historical
+    scenario. Only timestamp *creation* in the three isolated SQLite writer
+    helpers is replaced. The real production clock, audit validation,
+    assertions, and default PAPER trading prohibition are untouched.
+    """
+    from wealthy_server import stage1_bootstrap, stage1_portfolios, stage1_controls, stage1_paper
+
+    class HistoricalRecordDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            if tz is None:
+                return NOW.replace(tzinfo=None)
+            return NOW.astimezone(tz)
+
+    for module in (stage1_paper, stage1_bootstrap, stage1_portfolios, stage1_controls):
+        monkeypatch.setattr(module, "datetime", HistoricalRecordDatetime)
+
+
 def setup(tmp_path,owner="alice"):
     path=tmp_path/"stage1-paper.sqlite3"
     ledger=Stage1Ledger(path)

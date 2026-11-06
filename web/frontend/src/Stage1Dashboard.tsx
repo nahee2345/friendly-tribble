@@ -1,4 +1,5 @@
 import {useEffect,useMemo,useState} from 'react';
+import {ApiError,request as authenticatedRequest,subscribeAuthInvalidation} from './api';
 import './stage1-dashboard.css';
 
 type Market={name:string;status:string;value:string|null;change_pct:number|null;as_of:string|null;source:string};
@@ -35,9 +36,12 @@ const newsStateKo=(state:string|null|undefined):string=>({
 const strategyLabels:Record<string,string>={index:'장기지수',value:'가치',quality_growth:'우량성장',growth:'성장',high_dividend:'고배당',dividend_growth:'배당성장',momentum:'모멘텀',asset_allocation:'자산배분'};
 type ReferenceHealth={current_references:Record<string,number>;recent_attempts:{kind:string;symbol:string;provider:string;checked_utc:string;status:string;error_code:string|null;retry_after_utc:string}[];paper_order_eligible:boolean;notice:string;sec_contact_configured:boolean};
 const fmt=(x:string|number|null|undefined,d=0)=>x===null||x===undefined?'자료 없음':Number(x).toLocaleString('ko-KR',{maximumFractionDigits:d});
-function csrf(){const token=document.cookie.split(';').map(x=>x.trim()).find(x=>x.startsWith('wealthy_csrf='));return token?decodeURIComponent(token.slice(13)):'';}
-async function read<T>(url:string):Promise<T>{const r=await fetch(url,{credentials:'same-origin',cache:'no-store'});if(!r.ok)throw Error('데이터 요청 실패: '+r.status);return r.json();}
-async function write<T>(url:string,payload:unknown):Promise<T>{const r=await fetch(url,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf()},body:JSON.stringify(payload)});if(!r.ok)throw Error('업데이트 실패: '+r.status);return r.json();}
+// Every dashboard quote, NAV, alert, and PAPER read shares the same session
+// generation barrier as /assets. A late 200/401/403 never revives old cards.
+async function read<T>(url:string):Promise<T>{return authenticatedRequest<T>(url);}
+async function write<T>(url:string,payload:unknown):Promise<T>{
+  return authenticatedRequest<T>(url,{method:'POST',body:JSON.stringify(payload)});
+}
 function AssetGraph({data}:{data:History[]}){
   const values=data.filter(x=>x.value_krw!==null).map(x=>Number(x.value_krw));
   const contributed=data.map(x=>x.contributed_krw);
@@ -96,7 +100,7 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
     const requests=[
       read<Hub>('/api/v1/stage1/hub').then(result=>{setHub(result);setAuthBlocked(false);}).catch(error=>{
         setHub(null);setStage8(null);setAccounting(null);setNews(null);setQuant(null);setPlan(null);
-        if(/데이터 요청 실패: (401|403)/.test(String(error)))setAuthBlocked(true);
+        if(error instanceof ApiError && [401,403].includes(error.status))setAuthBlocked(true);
         setError('인증 또는 자산 조회 실패. 금융정보를 숨겼습니다.');
       }),
       read<NewsReport>('/api/v1/stage1/news-30d').then(setNews).catch(()=>setNews({
@@ -116,7 +120,16 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
     if(reference)setReferenceHealth(reference);
     setBusy(false);
   }
-  useEffect(()=>{void loadHome();const interval=setInterval(()=>void loadHome(),300_000);return()=>clearInterval(interval);},[]);
+  useEffect(()=>{
+    const unsubscribe=subscribeAuthInvalidation(()=>{
+      setHub(null);setStage8(null);setAccounting(null);setNews(null);
+      setQuant(null);setPlan(null);setReferenceHealth(null);setRiskReview(null);
+      setAuthBlocked(true);
+    });
+    void loadHome();
+    const interval=setInterval(()=>void loadHome(),300_000);
+    return()=>{clearInterval(interval);unsubscribe();};
+  },[]);
   useEffect(()=>{if(tab!=='search')return;let active=true;
     const delay=setTimeout(()=>{read<Catalog>('/api/v1/stage1/securities?'+new URLSearchParams({q:query,market,kind,limit:'50',offset:String(catalogOffset)}))
       .then(r=>{if(active)setCatalog(r);}).catch(()=>{if(active)setError('종목목록 검색에 실패했습니다.');});},280);
@@ -218,6 +231,7 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
     <p>접근이 차단되어 자산·뉴스·보고서·알림을 표시하지 않습니다. 로그인 상태를 다시 확인하세요.</p>
   </main>;
   return <div className="wh-wrap">
+    <h1 className="visually-hidden">{tab==='home'?'통합 대시보드':'전체 종목 검색'}</h1>
     <header className="wh-header"><div><b>WEALTHY</b><small>미국·한국 자동 모의투자 · 실시간 호가 아님</small></div>
       <nav><button className={tab==='home'?'on':''} onClick={()=>setTab('home')}>통합 대시보드</button>
       <button className={tab==='search'?'on':''} onClick={()=>setTab('search')}>전체 종목 검색</button>
@@ -229,6 +243,11 @@ export function Stage1Dashboard({onAdvanced}:{onAdvanced:()=>void}){
       <span title="보유종목 관련 하방 위험 의심 알림">위험 알림 {riskUnread}</span>
     </header>
     {error&&<div className="wh-error">{error}</div>}
+    {tab==='home'&&<section className="wh-caveat" aria-label="실제 주문 및 입력자료 상태">
+      <strong>실제 증권사 주문</strong> · <span>주문 기능 없음</span>
+      {' · '}PAPER 거래는 별도 시작 NAV·승인·원장 검증 전 차단
+      {!hub&&!stage8&&<> · 입력자료: <span>미입력</span></>}
+    </section>}
     {tab==='home'&&<div className="wh-stage8-strip">
       <span><b>실제 가상계좌</b> {stage8?.actual_owner.initial_4000000_recorded?
         '초기 400만원 입금 확인':'초기 입금 확인 중'}</span>
