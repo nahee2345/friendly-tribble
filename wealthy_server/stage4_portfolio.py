@@ -485,7 +485,15 @@ class PortfolioEngine:
         # read-only and cannot authorize any simulated execution.
         from .stage7_release import audit_paper_ledger
         audit = audit_paper_ledger(owner, self.portfolios, now=now)
-        if audit["blocking_count"]:
+        # An entirely uninitialized owner is not a corrupted funded book;
+        # keep the NAV gate's public "session_unverified" contract. Never
+        # downgrade any malformed event, unsafe cash, interrupted claim, or
+        # partially populated account scope.
+        uninitialized = (
+            audit.get("counts",{}).get("accounts")==0
+            and {x["code"] for x in audit["issues"]}=={"NO_SIMULATED_ACCOUNTS"}
+        )
+        if audit["blocking_count"] and not uninitialized:
             return {"status":"integrity_blocked",
                     "reason":"가상투자 원장 무결성 감사 실패; 상세 감사에서 원인을 확인하세요.",
                     "issues":audit["issues"],"executed":[],"skipped":[],
