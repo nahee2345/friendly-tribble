@@ -171,3 +171,71 @@
 5. **총괄팀**: 구형 성공 기대 6건/Stage4 런타임 차단 정책의 재수용 여부 결정(근거 없는 기존 테스트 녹색화 불가).
 
 **상태:** Stage2 전체 NOT PASSED. 83개 검사의 두 날짜 경로에 아직 40/45 FAIL, 외부 실제 시세/FX NAV 증거·독립 전체 QA·실제 인증 Chrome 미완료. 자동 PAPER OFF, `readiness.verified=false`, Draft, main/운영 DB/실주문 미변경.
+
+## 후속: 안전정책에 맞춰 test-only PAPER fixture 명시적으로 허용 — 2026-11-06
+
+**같은 원본 83개 test node ID·원본 assert 문자열·skip 없이** Stage4, Stage5, Stage6, Stage7의 오프라인 synthetic 거래 fixture에 `set_paused(owner,p,False,"isolated ... test-only opt-in")`를 추가했습니다. **실제 운영 readiness=false·PAPER OFF는 유지**하며, 배포 환경 DB나 시장 증거는 절대 변경하지 않았습니다. 의도된 default pause 시험 및 무결성·임계값 assertion은 수정하지 않았습니다.
+
+- 제품 상태 진단 우선순위 수정만 반영한 `c274566c...`: 10/19 **43 PASS / 40 FAIL**, 11/06 **38 PASS / 45 FAIL**.
+- fixture 명시적 허용 반영한 코드 `c999075bba5dfb70d8d6f85ea3d1804a5355aaa0`: 10/19 **72 PASS / 11 FAIL**, 11/06 **64 PASS / 19 FAIL**. 이전 코드/fixture와 동일하게 비교해서 제품 코드가 모두 고쳐졌다는 뜻은 아닙니다.
+- 안전 차단 대상 재검증: **47 PASS**, 상태 `readiness.verified=false` 유지.
+- [후속 CI Run 42164537736](https://github.com/nahee2345/friendly-tribble/actions/runs/42164537736): 기준/PR29/PR32는 **고정 원본 테스트**, triage-current만 **fixture가 명시적으로 허용된 수정 버전**임을 구분해 해석해야 합니다. 미완료 FAIL은 계속 빨간색 유지.
+
+### 현행 fixture에서 여전히 실패한 19개 고유 node ID
+`F`=FAIL, `P`=PASS. **두 시간의 F를 더하지 않습니다.**
+
+| Node ID | 10/19 | 11/06 | 첫 장애 / 분류 |
+|---|---|---|---|
+| `tests.test_stage4_portfolio::test_allocations_obey_total_daily_cap_across_multiple_sleeves` | F | F | 검증 전 거래 성공을 가정한 Stage4 런타임 계약 또는 시간 불일치 |
+| `tests.test_stage4_portfolio::test_concurrent_external_buys_rechecked_against_symbol_concentration` | F | F | planner/runner 초기 차단의 빈 skipped/order 추종(연쇄, API raw 예외인지 별도 확인) |
+| `tests.test_stage4_portfolio::test_domestic_isa_routing_only_for_approved_etf` | F | F | 후속 정책 상태/계획 후보 미검증 |
+| `tests.test_stage4_portfolio::test_fresh_fx_deviation_blocks_usd_buy` | F | F | planner/runner 초기 차단의 빈 skipped/order 추종(연쇄, API raw 예외인지 별도 확인) |
+| `tests.test_stage4_portfolio::test_independently_reverified_price_deviation_rejected_without_claim` | F | F | planner/runner 초기 차단의 빈 skipped/order 추종(연쇄, API raw 예외인지 별도 확인) |
+| `tests.test_stage4_portfolio::test_legacy_manual_buy_consume_same_day_portfolio_spending_budget` | F | F | 후속 정책 상태/계획 후보 미검증 |
+| `tests.test_stage4_portfolio::test_missing_fx_entire_global_plan_blocks_and_no_provider_call` | F | F | 검증 전 거래 성공을 가정한 Stage4 런타임 계약 또는 시간 불일치 |
+| `tests.test_stage4_portfolio::test_one_owner_paper_execution_idempotent_and_within_cap` | F | F | 검증 전 거래 성공을 가정한 Stage4 런타임 계약 또는 시간 불일치 |
+| `tests.test_stage4_portfolio::test_policy_change_between_plan_and_fresh_quote_blocks_fill` | F | F | planner/runner 초기 차단의 빈 skipped/order 추종(연쇄, API raw 예외인지 별도 확인) |
+| `tests.test_stage4_portfolio::test_stop_loss_review_and_sell_stops_same_sleeve_reentry` | F | F | 후속 정책 상태/계획 후보 미검증 |
+| `tests.test_stage6_risk::test_stage4_rechecks_risk_snapshot_hash_after_external_change` | F | F | planner/runner 초기 차단의 빈 skipped/order 추종(연쇄, API raw 예외인지 별도 확인) |
+| `tests.test_stage7_release::test_claim_with_real_simulated_order_is_consistent` | P | F | 원본 감사 NOW(10/19) 대 새로운 원장 created_utc(11/06) 시각 불일치 |
+| `tests.test_stage7_release::test_corrupted_backup_fails_without_touching_active_paper_db` | P | F | 원본 감사 NOW(10/19) 대 새로운 원장 created_utc(11/06) 시각 불일치 |
+| `tests.test_stage7_release::test_cross_account_funding_fx_buy_sale_and_sqlite_checks` | P | F | 원본 감사 NOW(10/19) 대 새로운 원장 created_utc(11/06) 시각 불일치 |
+| `tests.test_stage7_release::test_default_funded_accounts_are_healthy_and_unpaused_is_not_assumed` | P | F | 원본 감사 NOW(10/19) 대 새로운 원장 created_utc(11/06) 시각 불일치 |
+| `tests.test_stage7_release::test_old_five_column_daily_nav_is_warning_and_audit_does_not_migrate` | P | F | 원본 감사 NOW(10/19) 대 새로운 원장 created_utc(11/06) 시각 불일치 |
+| `tests.test_stage7_release::test_sqlite_readonly_audit_does_not_change_paper_table_counts` | P | F | 원본 감사 NOW(10/19) 대 새로운 원장 created_utc(11/06) 시각 불일치 |
+| `tests.test_stage7_release::test_unsigned_old_nav_produces_warning_not_false_corroboration` | P | F | 원본 감사 NOW(10/19) 대 새로운 원장 created_utc(11/06) 시각 불일치 |
+| `tests.test_stage7_release::test_user_isolation_no_cross_owner_orders_or_claims` | P | F | 원본 감사 NOW(10/19) 대 새로운 원장 created_utc(11/06) 시각 불일치 |
+
+**개선된 node ID 29개:** 아래는 동일 testcase ID에 대해 fixture 명시적 허용 전 F에서 허용 후 P로 바뀐 항목이며, 기대값 삭제/skip/완화가 없습니다.
+
+- `tests.test_stage4_portfolio::test_missing_held_security_price_blocks_buy_until_valued`
+- `tests.test_stage4_portfolio::test_sell_notional_above_300k_requires_approval_not_auto_fill`
+- `tests.test_stage4_portfolio::test_unknown_held_security_prevents_guessing_market_exposure`
+- `tests.test_stage5_accounting::test_cash_only_and_foreign_only_do_not_claim_isa_tax_savings`
+- `tests.test_stage5_accounting::test_corporate_event_even_marked_reconciled_stops_unadjusted_inventory`
+- `tests.test_stage5_accounting::test_dividend_without_pre_exdate_holdings_is_not_counted`
+- `tests.test_stage5_accounting::test_fee_receipts_have_explicit_unposted_currency_and_native_totals`
+- `tests.test_stage5_accounting::test_isa_comparison_does_not_misclassify_domestic_equity_etf_gain`
+- `tests.test_stage5_accounting::test_missing_held_quote_makes_nav_and_xirr_unavailable`
+- `tests.test_stage5_accounting::test_owner_isolation_rejects_other_owner_and_never_moves_cash`
+- `tests.test_stage5_accounting::test_partial_exit_moving_average_realized_native`
+- `tests.test_stage5_accounting::test_realized_usd_fx_split_from_both_proven_acquisition_and_exit_rates`
+- `tests.test_stage5_accounting::test_realized_usd_sale_missing_fx_source_does_not_fabricate_conversion`
+- `tests.test_stage5_accounting::test_recorded_paper_fee_does_not_silently_reduce_cash`
+- `tests.test_stage5_accounting::test_sale_year_overseas_gain_comparison_only_with_known_trade_fx`
+- `tests.test_stage5_accounting::test_unconfirmed_dividend_exdate_belongs_to_pre_exdate_holder_only`
+- `tests.test_stage5_accounting::test_usd_manual_purchases_without_fx_are_never_revalued_at_today_buy_rate`
+- `tests.test_stage5_accounting::test_usd_purchase_fx_split_exact_and_reconcile_original_cash`
+- `tests.test_stage6_risk::test_correlated_risk_notification_cites_both_prices_and_deduplicates`
+- `tests.test_stage6_risk::test_cross_currency_portfolio_refuses_historical_krw_volatility`
+- `tests.test_stage6_risk::test_index_overlap_warning_is_not_fictitious_constituent_percentage`
+- `tests.test_stage6_risk::test_same_currency_pairwise_return_correlation`
+- `tests.test_stage6_risk::test_source_based_high_risk_alert_deduplicates_and_is_owner_scoped`
+- `tests.test_stage6_risk::test_stress_is_scenario_only_and_requires_held_quote`
+- `tests.test_stage7_release::test_claim_with_real_simulated_order_is_consistent`
+- `tests.test_stage7_release::test_cross_account_funding_fx_buy_sale_and_sqlite_checks`
+- `tests.test_stage7_release::test_invalid_timestamp_and_nonfinite_order_value_are_detected`
+- `tests.test_stage7_release::test_negative_position_from_tampered_order_is_blocked`
+- `tests.test_stage7_release::test_user_isolation_no_cross_owner_orders_or_claims`
+
+**미종결/인계:** Stage4 검증 NAV 없이 정상 체결 기대 계약은 정책상 허용 불가. 외부 시세·환율 source 및 로그인 HTTP→Stage4 E2E와 구형 6건 성공 기대를 QA 독립적으로 수용할지 결정해야 합니다. 11/06 역사적 NOW/created_utc 시차는 수신 시각 조작이나 테스트 무효화로 덮지 않고, 동일 시각의 안전한 synthetic fixture/달력 경계 케이스를 추가해 확인합니다.
