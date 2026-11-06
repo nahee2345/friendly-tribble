@@ -406,3 +406,44 @@ def test_real_sigkill_and_restart_leave_exactly_one_consistent_fill(tmp_path,pha
         assert db.execute("SELECT COUNT(*) FROM stage1_turnover_claims WHERE owner=?",(OWNER,)).fetchone()[0]==1
         assert db.execute("""SELECT COUNT(*) FROM stage1_events WHERE owner=?
                    AND kind='virtual_fx'""",(OWNER,)).fetchone()[0]==1
+
+
+def test_approval_299999_300000_300001_and_exact_24h_expiry(tmp_path):
+    p,_,_=ready(tmp_path)
+    # The open reference is a synthetic fixture and is NEVER a market quote.
+    small={**KR,"price":"299999"}
+    assert execute_verified_paper(p,owner=OWNER,account="kr-base",
+        symbol="069500",side="BUY",quantity=1,
+        request_id="threshold-299999",quote=small,
+        session_date=DAY,now=NOW)["status"]=="executed"
+    exact={**KR,"price":"300000"}
+    with pytest.raises(ValueError,match="APPROVAL_REQUIRED_300000_KRW"):
+        execute_verified_paper(p,owner=OWNER,account="kr-base",
+            symbol="069500",side="BUY",quantity=1,
+            request_id="threshold-300000",quote=exact,
+            session_date=DAY,now=NOW)
+    request_approval(OWNER,p,request_id="threshold-300000",
+        account="kr-base",symbol="069500",side="BUY",quantity=1,
+        amount_krw=300000,rationale="synthetic exactly 300k approval")
+    decide_approval(OWNER,p,"threshold-300000",True)
+    # Approval is bound to the maximum authorized amount, not to an earlier
+    # FX/price; a later increase by exactly one KRW must be blocked.
+    with pytest.raises(ValueError,match="APPROVAL_SCOPE_AMOUNT_OR_EXPIRY_MISMATCH"):
+        execute_verified_paper(p,owner=OWNER,account="kr-base",
+            symbol="069500",side="BUY",quantity=1,
+            request_id="threshold-300000",quote={**KR,"price":"300001"},
+            session_date=DAY,now=NOW)
+    with p._db() as db:
+        db.execute("""UPDATE stage1_approvals SET expires_at=?
+                      WHERE owner=? AND request_id=?""",
+                   (NOW.isoformat(),OWNER,"threshold-300000"))
+    with pytest.raises(ValueError,match="APPROVAL_SCOPE_AMOUNT_OR_EXPIRY_MISMATCH"):
+        execute_verified_paper(p,owner=OWNER,account="kr-base",
+            symbol="069500",side="BUY",quantity=1,
+            request_id="threshold-300000",quote=exact,
+            session_date=DAY,now=NOW)
+    with p._db() as db:
+        assert db.execute("""SELECT COUNT(*) FROM virtual_orders
+                   WHERE owner=?""",(OWNER,)).fetchone()[0]==1
+        assert db.execute("""SELECT COUNT(*) FROM stage1_turnover_claims
+                   WHERE owner=?""",(OWNER,)).fetchone()[0]==1
