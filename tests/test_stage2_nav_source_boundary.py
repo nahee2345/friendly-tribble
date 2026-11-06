@@ -27,7 +27,7 @@ def assert_no_opening_nav_or_claim(p):
 
 def test_fx_cache_payload_mutation_blocks_nav_without_any_write(tmp_path):
     p,market=sample_store(tmp_path)
-    with p._db() as db:
+    with market._db() as db:
         db.execute("UPDATE market_snapshots SET payload_json=? WHERE kind='FX' AND symbol='USD/KRW'",('{}',))
     assert market.latest_many([('FX','USD/KRW')],now=NOW)[('FX','USD/KRW')]['reason']=='CACHE_INTEGRITY_FAILED'
     with pytest.raises(ValueError,match="UNVERIFIED_NAV_REFERENCE_FX"):
@@ -41,7 +41,7 @@ def test_public_fx_observed_after_session_open_is_rejected(tmp_path):
     market.save(record)
     # The later replacement becomes the current cache pointer and cannot be
     # backdated into the 09:30 NY opening reference.
-    with pytest.raises(ValueError,match="STALE_OR_POST_OPEN_NAV_REFERENCE"):
+    with pytest.raises(ValueError,match="UNVERIFIED_NAV_REFERENCE_FX"):
         establish_verified_opening_nav(p,market,OWNER,DAY,now=NOW)
     assert_no_opening_nav_or_claim(p)
 
@@ -49,8 +49,9 @@ def test_public_fx_observed_after_session_open_is_rejected(tmp_path):
 def test_five_day_reference_age_is_hard_boundary(tmp_path):
     p,market=sample_store(tmp_path)
     stale_time=BEFORE-timedelta(days=7)
-    old=validated_snapshot('FX','USD/KRW','FRANKFURTER',FX_URL,FX,now=stale_time)
-    with p._db() as db:
+    old=validated_snapshot('FX','USD/KRW','FRANKFURTER',FX_URL,
+                           {**FX,'as_of':stale_time.date().isoformat()},now=stale_time)
+    with market._db() as db:
         db.execute("DELETE FROM market_current WHERE kind='FX' AND symbol='USD/KRW'")
         db.execute("DELETE FROM market_snapshots WHERE kind='FX' AND symbol='USD/KRW'")
     market.save(old)
