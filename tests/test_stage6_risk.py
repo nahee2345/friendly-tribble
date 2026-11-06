@@ -16,6 +16,7 @@ from wealthy_server.stage1_market_store import MarketStore,validated_snapshot
 from wealthy_server.stage1_portfolios import Portfolios
 from wealthy_server.stage1_paper import Stage1Ledger
 from wealthy_server.stage1_bootstrap import initialize_paper_accounts
+from wealthy_server.stage1_controls import set_paused
 from wealthy_server.stage1_inbox import inbox
 from wealthy_server.stage6_risk import (_risk,_drawdown,_correlation,walk_forward_momentum,
     review_candidate,RiskEngine)
@@ -68,6 +69,9 @@ def prepare(tmp_path):
     ledger=Stage1Ledger(path)
     portfolios=Portfolios(path)
     initialize_paper_accounts("alice",ledger,portfolios,today=NOW.date())
+    # Isolated synthetic risk holdings require explicit PAPER opt-in.
+    # This is not a runtime NAV gate bypass.
+    set_paused("alice",portfolios,False,"isolated stage6 test-only opt-in")
     cache=MarketStore.for_portfolios(portfolios)
     write(cache,"FX","USD/KRW",{"status":"ok","executable":False,
                                  "usd_krw":"1400","as_of":CLOSE.isoformat()})
