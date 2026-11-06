@@ -1,4 +1,5 @@
 import {useEffect,useRef,useState} from 'react';
+import {ApiError,request as authenticatedRequest} from './api';
 import './manual-assets.css';
 
 type Stock={account:string;symbol:string;currency:string;quantity:string;scope:string;cost_basis_status:string;average_cost_native:string|null;total_cost_native:string|null;realized_pnl_native:string|null;unrealized_pnl_native:string|null;duplicate_currency_conflict:boolean;history_reconciled:boolean};
@@ -6,16 +7,16 @@ type Balance={label:string;currency:string;amount:string};
 type ManualTrade={account:string;symbol:string;currency:string;side:string;quantity:string;unit_price:string|null;trade_date:string|null;recorded_at:string};
 type Result={items:Stock[];balances:Balance[];history:ManualTrade[];scope:string;included_in_paper_nav:boolean;included_in_sample_nav?:boolean;verified_real_asset_total_krw?:string|null;real_total_status?:string;notice?:string};
 
-function csrf():string{
-  const item=document.cookie.split(';').map(v=>v.trim()).find(v=>v.startsWith('wealthy_csrf='));
-  return item?decodeURIComponent(item.slice('wealthy_csrf='.length)):'';
-}
+// All manual-asset reads/writes participate in the same auth generation,
+// CSRF and fail-closed 401/403 barrier as the dashboard.
 async function request<T>(path:string,payload?:unknown):Promise<T>{
-  const r=await fetch(path,payload===undefined
-    ?{credentials:'same-origin',cache:'no-store'}
-    :{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf()},body:JSON.stringify(payload)});
-  if(!r.ok)throw new Error('HTTP '+r.status);
-  return r.json() as Promise<T>;
+  try{
+    return await authenticatedRequest<T>(path,payload===undefined?{}:{method:'POST',body:JSON.stringify(payload)});
+  }catch(e){
+    // Preserve original HTTP-status branching for ambiguous/idempotent writes.
+    if(e instanceof ApiError)throw Error('HTTP '+e.status);
+    throw e;
+  }
 }
 const PENDING_MANUAL_KEY='wealthy:manual-unresolved:v1';
 type PendingMarker={request_id:string;kind:'stock'|'cash';created_at:string};
