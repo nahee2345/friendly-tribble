@@ -329,3 +329,121 @@ def test_unknown_reservation_is_not_released_or_replayed(tmp_path):
                  WHERE owner=? AND request_id='unknown-p0-001'""",
                  (OWNER,)).fetchone()[0]=="UNKNOWN"
         assert db.execute("SELECT COUNT(*) FROM virtual_orders").fetchone()[0]==0
+
+
+def _sigkill_worker(db_path,phase):
+    """Real OS kill at a writer transition, without production code toggles."""
+    import os
+    import signal
+    from pathlib import Path
+    import wealthy_server.stage1_verified_execution as executor
+    p=Portfolios(Path(db_path),require_verified_p0=True)
+    if phase=="after_reserve":
+        original=executor.reserve
+        def stop(*args,**kwargs):
+            result=original(*args,**kwargs)
+            os.kill(os.getpid(),signal.SIGKILL)
+            return result
+        executor.reserve=stop
+    elif phase=="after_fx_and_order_insert":
+        # Receipts are inserted after the FX event and virtual order row.
+        p._receipt=lambda *args,**kwargs:os.kill(os.getpid(),signal.SIGKILL)
+    elif phase=="after_filled_before_commit":
+        original=executor.mark_filled
+        def stop(*args,**kwargs):
+            result=original(*args,**kwargs)
+            os.kill(os.getpid(),signal.SIGKILL)
+            return result
+        executor.mark_filled=stop
+    result=execute_verified_paper(
+        p,owner=OWNER,account="default",symbol="SPYM",side="BUY",
+        quantity=1,request_id="sigkill-order-001",quote=US,fx=FX,
+        auto_fx=True,session_date=DAY,now=NOW)
+    assert result["status"]=="executed"
+    if phase=="after_commit":
+        os.kill(os.getpid(),signal.SIGKILL)
+
+
+@pytest.mark.parametrize("phase",[
+    "after_reserve","after_fx_and_order_insert",
+    "after_filled_before_commit","after_commit"
+])
+def test_real_sigkill_and_restart_leave_exactly_one_consistent_fill(tmp_path,phase):
+    from multiprocessing import get_context
+    import signal
+    folder=tmp_path/phase
+    folder.mkdir()
+    p,_,_=ready(folder)
+    child=get_context("fork").Process(
+        target=_sigkill_worker,args=(str(p.path),phase))
+    child.start()
+    child.join(timeout=15)
+    if child.is_alive():
+        child.kill()
+        child.join(10)
+        pytest.fail("interrupted writer failed to exit within 15 seconds")
+    assert child.exitcode==-signal.SIGKILL
+    restarted=Portfolios(p.path,require_verified_p0=True)
+    with restarted._db() as db:
+        assert db.execute("PRAGMA integrity_check").fetchone()==("ok",)
+        counts=[
+            db.execute("SELECT COUNT(*) FROM "+table+" WHERE owner=?",(OWNER,)).fetchone()[0]
+            for table in ("virtual_orders","stage1_turnover_claims","stage1_trade_metadata")]
+        fx_count=db.execute("""SELECT COUNT(*) FROM stage1_events
+                   WHERE owner=? AND kind='virtual_fx'""",(OWNER,)).fetchone()[0]
+        if phase=="after_commit":
+            assert counts==[1,1,1] and fx_count==1
+        else:
+            assert counts==[0,0,0] and fx_count==0
+    retry=execute_verified_paper(
+        restarted,owner=OWNER,account="default",symbol="SPYM",side="BUY",
+        quantity=1,request_id="sigkill-order-001",quote=US,fx=FX,
+        auto_fx=True,session_date=DAY,now=NOW)
+    assert retry["status"]==(
+        "already_executed" if phase=="after_commit" else "executed")
+    with restarted._db() as db:
+        assert db.execute("SELECT COUNT(*) FROM virtual_orders WHERE owner=?",(OWNER,)).fetchone()[0]==1
+        assert db.execute("SELECT COUNT(*) FROM stage1_turnover_claims WHERE owner=?",(OWNER,)).fetchone()[0]==1
+        assert db.execute("""SELECT COUNT(*) FROM stage1_events WHERE owner=?
+                   AND kind='virtual_fx'""",(OWNER,)).fetchone()[0]==1
+
+
+def test_approval_299999_300000_300001_and_exact_24h_expiry(tmp_path):
+    p,_,_=ready(tmp_path)
+    # The open reference is a synthetic fixture and is NEVER a market quote.
+    small={**KR,"price":"299999"}
+    assert execute_verified_paper(p,owner=OWNER,account="kr-base",
+        symbol="069500",side="BUY",quantity=1,
+        request_id="threshold-299999",quote=small,
+        session_date=DAY,now=NOW)["status"]=="executed"
+    exact={**KR,"price":"300000"}
+    with pytest.raises(ValueError,match="APPROVAL_REQUIRED_300000_KRW"):
+        execute_verified_paper(p,owner=OWNER,account="kr-base",
+            symbol="069500",side="BUY",quantity=1,
+            request_id="threshold-300000",quote=exact,
+            session_date=DAY,now=NOW)
+    request_approval(OWNER,p,request_id="threshold-300000",
+        account="kr-base",symbol="069500",side="BUY",quantity=1,
+        amount_krw=300000,rationale="synthetic exactly 300k approval")
+    decide_approval(OWNER,p,"threshold-300000",True)
+    # Approval is bound to the maximum authorized amount, not to an earlier
+    # FX/price; a later increase by exactly one KRW must be blocked.
+    with pytest.raises(ValueError,match="APPROVAL_SCOPE_AMOUNT_OR_EXPIRY_MISMATCH"):
+        execute_verified_paper(p,owner=OWNER,account="kr-base",
+            symbol="069500",side="BUY",quantity=1,
+            request_id="threshold-300000",quote={**KR,"price":"300001"},
+            session_date=DAY,now=NOW)
+    with p._db() as db:
+        db.execute("""UPDATE stage1_approvals SET expires_at=?
+                      WHERE owner=? AND request_id=?""",
+                   (NOW.isoformat(),OWNER,"threshold-300000"))
+    with pytest.raises(ValueError,match="APPROVAL_SCOPE_AMOUNT_OR_EXPIRY_MISMATCH"):
+        execute_verified_paper(p,owner=OWNER,account="kr-base",
+            symbol="069500",side="BUY",quantity=1,
+            request_id="threshold-300000",quote=exact,
+            session_date=DAY,now=NOW)
+    with p._db() as db:
+        assert db.execute("""SELECT COUNT(*) FROM virtual_orders
+                   WHERE owner=?""",(OWNER,)).fetchone()[0]==1
+        assert db.execute("""SELECT COUNT(*) FROM stage1_turnover_claims
+                   WHERE owner=?""",(OWNER,)).fetchone()[0]==1

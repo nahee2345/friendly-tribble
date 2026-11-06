@@ -194,6 +194,35 @@ class WebApiTests(unittest.TestCase):
             self.assertIn(f"## {index})", markdown)
         self.assertIn("주문안: 없음", markdown)
 
+    def test_assets_account_scope_discloses_only_ledger_inclusions(self) -> None:
+        missing = self.client.get("/api/v1/portfolio")
+        self.assertEqual(missing.status_code, 200)
+        self.assertEqual(missing.json()["total_scope"]["status"], "NO_LEDGER")
+        self.assertEqual(missing.json()["total_scope"]["included_account_ids"], [])
+        self.assertIsNone(missing.json()["investable_total_krw"])
+
+        self.assertEqual(self.client.post(
+            "/api/v1/scenarios/sample",
+            headers=self.mutation_headers()
+        ).status_code, 200)
+        result = self.client.get("/api/v1/portfolio")
+        self.assertEqual(result.status_code, 200, result.text)
+        data = result.json()
+        scope = data["total_scope"]
+        self.assertEqual(scope["realm"], "SAMPLE")
+        self.assertFalse(scope["externally_verified"])
+        self.assertEqual(set(scope["included_account_ids"]), {
+            row["id"] for row in data["accounts"]
+            if row["included_in_investable_total"]
+        })
+        self.assertEqual(set(scope["excluded_account_ids"]), {
+            row["id"] for row in data["accounts"]
+            if not row["included_in_investable_total"]
+        })
+        for row in data["accounts"]:
+            self.assertEqual(row["data_scope"], "SAMPLE")
+            self.assertFalse(row["externally_verified"])
+
     def test_csrf_and_other_owner_report_access_are_blocked(self) -> None:
         self.assertEqual(self.client.post("/api/v1/scenarios/sample").status_code, 403)
         created = self.client.post(

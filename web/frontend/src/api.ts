@@ -28,6 +28,28 @@ export class ApiError extends Error {
   }
 }
 
+// The response of a request started under a previous login must never
+// repopulate protected cards after logout, 401/403, or an account switch.
+// Generation lives outside components so ALL API readers share one barrier.
+let authGeneration = 0;
+const authInvalidationListeners = new Set<() => void>();
+
+export function subscribeAuthInvalidation(listener: () => void): () => void {
+  authInvalidationListeners.add(listener);
+  return () => { authInvalidationListeners.delete(listener); };
+}
+
+export function invalidateAuthSession(): void {
+  authGeneration += 1;
+  for (const listener of authInvalidationListeners) listener();
+}
+
+export function noteAuthenticatedLogin(): void {
+  // Invalidates late requests issued while unauthenticated or for the
+  // preceding account without pretending that a remote logout occurred.
+  authGeneration += 1;
+}
+
 function csrfToken(): string | undefined {
   const item = document.cookie.split(";").map((part) => part.trim()).find((part) => part.startsWith("wealthy_csrf="));
   if (!item) return undefined;
@@ -35,6 +57,7 @@ function csrfToken(): string | undefined {
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const issuedGeneration = authGeneration;
   const headers = new Headers(init.headers);
   if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
@@ -50,6 +73,12 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     credentials: "same-origin",
     cache: "no-store"
   });
+  if (!response.ok && (response.status === 401 || response.status === 403)) {
+    invalidateAuthSession();
+  }
+  if (authGeneration !== issuedGeneration) {
+    throw new ApiError(401, "인증 정보가 변경되었습니다. 자료를 다시 불러와 주세요.");
+  }
   if (!response.ok) {
     const safeMessages: Record<number, string> = {
       400: "입력값을 확인해 주세요.",
@@ -63,15 +92,23 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw new ApiError(response.status, safeMessages[response.status]);
   }
   if (response.status === 204) return undefined as T;
-  return response.json() as Promise<T>;
+  const value = await response.json() as T;
+  if (authGeneration !== issuedGeneration) {
+    throw new ApiError(401, "인증 정보가 변경되었습니다. 자료를 다시 불러와 주세요.");
+  }
+  return value;
 }
 
 export const api = {
   session: () => request<SessionResponse>("/api/v1/session"),
   login: (username: string, password: string) => request<{ user: SessionResponse["user"] }>("/api/v1/login", {
     method: "POST", body: JSON.stringify({ username, password })
-  }),
-  logout: () => request<void>("/api/v1/logout", { method: "POST" }),
+  }).then((result) => { if (result.user) noteAuthenticatedLogin(); return result; }),
+  logout: () => {
+    // Wipe protected UI state before network latency or a failed logout.
+    invalidateAuthSession();
+    return request<void>("/api/v1/logout", { method: "POST" });
+  },
   changePassword: (currentPassword: string, newPassword: string) => request<void>("/api/v1/password", {
     method: "POST", body: JSON.stringify({ current_password: currentPassword, new_password: newPassword })
   }),
