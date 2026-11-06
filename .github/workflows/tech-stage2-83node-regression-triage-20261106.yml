@@ -12,15 +12,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        source: [historical-baseline, stage2-pr29, stage2-pr32]
+        time:
+          - {label: oct19, utc: '2026-10-19T10:00:00Z'}
+          - {label: nov06, utc: '2026-11-06T10:00:00Z'}
         include:
-          - label: historical-baseline
+          - source: historical-baseline
             ref: dc92c6021f1bbd9c71b44c4accdcf0b02c64dd22
-          - label: stage2-pr29
+          - source: stage2-pr29
             ref: 41295d54850c9fc6066c85a6578e0c9bbffe6f0f
-          - label: stage2-pr32
+          - source: stage2-pr32
             ref: eac7d7388e20d8cbb7c06a4e1d2174fc281e6d78
-        clock: ['2026-10-19T10:00:00Z', '2026-11-06T10:00:00Z']
-    name: ${{ matrix.label }} @ ${{ matrix.clock }}
+    name: ${{ matrix.source }} @ ${{ matrix.time.label }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -55,7 +58,7 @@ jobs:
         env:
           PYTHONPATH: /tmp
           PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
-          QA_FIXED_CLOCK: ${{ matrix.clock }}
+          QA_FIXED_CLOCK: ${{ matrix.time.utc }}
         run: |
           set +e
           python -m pytest -p wealthy_qa_fixed_clock --junitxml=triage/results.xml -q --tb=line \
@@ -87,6 +90,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: regression-${{ matrix.label }}-${{ matrix.clock }}
+          name: regression-${{ matrix.source }}-${{ matrix.time.label }}
           path: triage/
           retention-days: 14
