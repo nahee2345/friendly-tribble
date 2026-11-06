@@ -87,6 +87,7 @@ jobs:
           python -m pytest -q \
             tests/test_stage2_integrity_diagnostic_priority.py \
             tests/test_stage2_verified_opening_nav_and_atomic_paper.py \
+            tests/test_stage2_nav_source_boundary.py \
             tests/test_stage2_http_current_readiness.py \
             tests/test_tech_replay_qa30_stop.py \
             tests/test_p0_explicit_paper_control.py \
