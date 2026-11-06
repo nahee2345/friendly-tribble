@@ -144,6 +144,55 @@ for (const route of ['/accounts','/dashboard']) {
   const title = await page.title();
   observations.push({ test: route, status: 'PASS', title });
 }
+// Exercise an in-flight former-session financial response across an actual
+// logout and a fresh same-owner login. Only the *late* HTTP status is synthetic;
+// session cookies, React navigation, login/logout and protected fresh GETs are real.
+for (const lateStatus of [200, 401, 403]) {
+  await page.goto(root+'/accounts',{waitUntil:'domcontentloaded'});
+  let releaseFirst;
+  const holdFirst = new Promise(resolve => { releaseFirst=resolve; });
+  let seenFirst;
+  const firstRequestSeen = new Promise(resolve => { seenFirst=resolve; });
+  let held = false;
+  const intercept = async route => {
+    if (held) { await route.continue(); return; }
+    held=true; seenFirst();
+    await holdFirst;
+    if (lateStatus===200) {
+      const stale = {...initial.body, investable_total_krw:'99999999999',
+        total_scope:{status:'LEDGER_COMPLETE',realm:initial.body?.data_scope,
+          included_account_ids:['STALE_FINANCIAL_OWNER_MARKER'],excluded_account_ids:[]}};
+      await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(stale)});
+    } else {
+      await route.fulfill({status:lateStatus,contentType:'application/json',
+        body:JSON.stringify({error:{code:'SYNTHETIC_DELAYED_AUTH',message:'fixture only'}})});
+    }
+  };
+  await page.route('**/api/v1/portfolio',intercept);
+  await page.getByRole('link',{name:'내 자산'}).click();
+  await Promise.race([
+    firstRequestSeen,
+    new Promise((_,reject)=>setTimeout(()=>reject(Error('No in-flight portfolio request')),8000))
+  ]);
+  const [logoutHttp]=await Promise.all([
+    page.waitForResponse(r=>r.url().includes('/api/v1/logout')&&r.request().method()==='POST'),
+    page.getByRole('button',{name:'로그아웃'}).click()
+  ]);
+  assert(logoutHttp.status()===200,'Logout failed during delayed '+lateStatus);
+  await page.getByRole('heading',{name:'Wealthy에 로그인'}).waitFor();
+  await login(page,'design_a','design test account alpha 2026');
+  releaseFirst();
+  await page.waitForTimeout(350);
+  const proof=await page.evaluate(async()=>{
+    const response=await fetch('/api/v1/session');
+    return {sessionStatus:response.status,body:document.body.innerText};
+  });
+  assert(proof.sessionStatus===200,'Late '+lateStatus+' invalidated new authenticated session');
+  assert(!proof.body.includes('STALE_FINANCIAL_OWNER_MARKER'),'Former-session finance data resurfaced');
+  observations.push({test:'former-session-delayed-'+lateStatus+'-no-leak',status:'PASS',newSessionHttp:200});
+  await page.screenshot({path:resolve(out,'delayed-'+lateStatus+'-after-relogin.png'),fullPage:true});
+  await page.unroute('**/api/v1/portfolio',intercept);
+}
 await page.goto(root+'/assets',{waitUntil:'domcontentloaded'});
 const [logoutResponse] = await Promise.all([
   page.waitForResponse(response => response.url().includes('/api/v1/logout') && response.request().method() === 'POST', { timeout: 15000 }),
