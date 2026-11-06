@@ -90,7 +90,17 @@ assert(csrfRejection.status === 403, 'Missing CSRF allowed mutation: HTTP '+csrf
 observations.push({test:'authenticated-mutation-missing-csrf-403',status:'PASS',http:403});
 
 await page.goto(root + '/stage1', { waitUntil:'domcontentloaded' });
-await page.getByRole('heading',{name:'가상 투자 워크스페이스'}).waitFor();
+try {
+  await page.getByRole('heading',{name:'가상 투자 워크스페이스'}).waitFor({timeout:8000});
+} catch (error) {
+  const snapshot = await page.evaluate(() => ({
+    title:document.title, route:location.pathname,
+    bodyText:document.body.innerText.slice(0,1700)
+  }));
+  await page.screenshot({path:resolve(out,'stage1-page-missing-heading.png'),fullPage:true});
+  console.error('Stage1 real-app visibility diagnostic',JSON.stringify({snapshot,jsErrors:errors,error:String(error)}));
+  throw error;
+}
 const readiness = await page.evaluate(async () => {
   const response = await fetch('/api/v1/stage1/paper-execution-readiness');
   return {status:response.status, data:response.ok?await response.json():null};
